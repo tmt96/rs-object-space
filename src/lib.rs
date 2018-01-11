@@ -1,3 +1,4 @@
+#![feature(drain_filter)]
 #[cfg(test)]
 mod tests {
     #[test]
