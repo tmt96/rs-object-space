@@ -1,11 +1,4 @@
 #![feature(drain_filter)]
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn it_works() {
-        assert_eq!(2 + 2, 4);
-    }
-}
 
 pub mod object_space;
 mod entry;

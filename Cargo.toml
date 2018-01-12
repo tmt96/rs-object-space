@@ -1,5 +1,5 @@
 [package]
-name = "r_object_space"
+name = "object_space"
 version = "0.1.0"
 authors = ["tmt <mt12@williams.edu>"]
 

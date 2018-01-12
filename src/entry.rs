@@ -88,4 +88,58 @@ where
     {
         self.object_list.drain_filter(cond)
     }
+
+    pub fn len(&self) -> usize {
+        self.object_list.len()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn get() {
+        let mut entry = ObjectSpaceEntry::<String>::new();
+        assert_eq!(entry.get(), None);
+        entry.add(String::from("Hello World"));
+        assert_eq!(entry.get(), Some(&String::from("Hello World")));
+        assert_ne!(entry.get(), None);
+    }
+
+    #[test]
+    fn remove() {
+        let mut entry = ObjectSpaceEntry::<String>::new();
+        assert_eq!(entry.remove(), None);
+        entry.add(String::from("Hello World"));
+        assert_eq!(entry.remove(), Some(String::from("Hello World")));
+        assert_eq!(entry.remove(), None);
+    }
+
+    #[test]
+    fn get_all() {
+        let mut entry = ObjectSpaceEntry::<String>::new();
+        assert_eq!(entry.get_all().count(), 0);
+        entry.add("Hello".to_string());
+        entry.add("World".to_string());
+        let mut iter = entry.get_all();
+        assert_eq!(iter.next(), Some(&"Hello".to_string()));
+        assert_eq!(iter.next(), Some(&"World".to_string()));
+        assert_eq!(iter.next(), None);
+        assert_ne!(entry.len(), 0);
+    }
+
+    #[test]
+    fn remove_all() {
+        let mut entry = ObjectSpaceEntry::<String>::new();
+        assert_eq!(entry.remove_all().count(), 0);
+        entry.add("Hello".to_string());
+        entry.add("World".to_string());
+        let mut iter = entry.remove_all();
+        assert_eq!(iter.next(), Some("Hello".to_string()));
+        assert_eq!(iter.next(), Some("World".to_string()));
+        assert_eq!(iter.next(), None);
+        // TODO: check for length
+    }
+
 }
