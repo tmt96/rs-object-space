@@ -1,20 +1,19 @@
-use std::iter::Filter;
-use std::vec::{Drain, DrainFilter};
 use std::any::Any;
-use std::slice::Iter;
+use std::clone::Clone;
+use std::iter::FromIterator;
 
 pub trait ObjectSpaceEntryFamily {
     fn as_any_ref(&self) -> &Any;
     fn as_any_mut(&mut self) -> &mut Any;
 }
 
-pub struct ObjectSpaceEntry<T: Default + Any> {
+pub struct ObjectSpaceEntry<T: Clone + Any> {
     object_list: Vec<T>,
 }
 
 impl<T> ObjectSpaceEntryFamily for ObjectSpaceEntry<T>
 where
-    T: Default + Any,
+    T: Clone + Any,
 {
     fn as_any_ref(&self) -> &Any {
         self
@@ -27,7 +26,7 @@ where
 
 impl<T> ObjectSpaceEntry<T>
 where
-    T: Default + Any,
+    T: Clone + Any,
 {
     pub fn new() -> ObjectSpaceEntry<T> {
         ObjectSpaceEntry::<T> {
@@ -53,22 +52,22 @@ where
         }
     }
 
-    pub fn get_all(&self) -> Iter<T> {
-        self.object_list.iter()
+    pub fn get_all(&self) -> Vec<&T> {
+        Vec::from_iter(self.object_list.iter())
     }
 
-    pub fn get_all_conditional<P>(&self, cond: P) -> Filter<Iter<T>, P>
+    pub fn get_all_conditional<P>(&self, cond: P) -> Vec<&T>
     where
         for<'r> P: Fn(&'r &T) -> bool,
     {
-        self.object_list.iter().filter(cond)
+        Vec::from_iter(self.object_list.iter().filter(cond))
     }
 
     pub fn remove(&mut self) -> Option<T> {
         self.object_list.pop()
     }
 
-    pub fn remove_conditional<P>(&mut self, cond: &P) -> Option<T>
+    pub fn remove_conditional<'a, P>(&mut self, cond: &P) -> Option<T>
     where
         P: Fn(&T) -> bool,
     {
@@ -78,18 +77,20 @@ where
             .map(|index| self.object_list.remove(index))
     }
 
-    pub fn remove_all(&mut self) -> Drain<T> {
-        self.object_list.drain(..)
+    pub fn remove_all(&mut self) -> Vec<T> {
+        let result = self.object_list.clone();
+        self.object_list = Vec::new();
+        result
     }
 
-    pub fn remove_all_conditional<P>(&mut self, cond: P) -> DrainFilter<T, P>
+    pub fn remove_all_conditional<P>(&mut self, cond: P) -> Vec<T>
     where
         for<'r> P: Fn(&'r mut T) -> bool,
     {
-        self.object_list.drain_filter(cond)
+        Vec::from_iter(self.object_list.drain_filter(cond))
     }
 
-    pub fn len(&self) -> usize {
+    fn len(&self) -> usize {
         self.object_list.len()
     }
 }
@@ -119,27 +120,21 @@ mod tests {
     #[test]
     fn get_all() {
         let mut entry = ObjectSpaceEntry::<String>::new();
-        assert_eq!(entry.get_all().count(), 0);
+        assert_eq!(entry.get_all().len(), 0);
         entry.add("Hello".to_string());
         entry.add("World".to_string());
-        let mut iter = entry.get_all();
-        assert_eq!(iter.next(), Some(&"Hello".to_string()));
-        assert_eq!(iter.next(), Some(&"World".to_string()));
-        assert_eq!(iter.next(), None);
+        assert_eq!(entry.get_all(), vec!["Hello", "World"]);
         assert_ne!(entry.len(), 0);
     }
 
     #[test]
     fn remove_all() {
         let mut entry = ObjectSpaceEntry::<String>::new();
-        assert_eq!(entry.remove_all().count(), 0);
+        assert_eq!(entry.remove_all().len(), 0);
         entry.add("Hello".to_string());
         entry.add("World".to_string());
-        let mut iter = entry.remove_all();
-        assert_eq!(iter.next(), Some("Hello".to_string()));
-        assert_eq!(iter.next(), Some("World".to_string()));
-        assert_eq!(iter.next(), None);
-        // TODO: check for length
+        assert_eq!(entry.remove_all(), vec!["Hello", "World"]);
+        assert_eq!(entry.len(), 0);
     }
 
 }
