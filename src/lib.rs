@@ -2,3 +2,4 @@
 
 pub mod object_space;
 mod entry;
+mod type_box;
