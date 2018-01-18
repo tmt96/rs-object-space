@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::any::{Any, TypeId};
 use std::iter;
 use entry::{ObjectSpaceEntry, ObjectSpaceEntryFamily};
+use type_box::{Type, TypeFamily};
 
 pub trait ObjectSpace {
     fn write<T>(&mut self, obj: T)
@@ -64,12 +65,14 @@ pub trait ObjectSpace {
 }
 
 pub struct SequentialObjectSpace {
+    type_lookup_dict: HashMap<TypeId, Box<TypeFamily>>,
     typeid_entries_dict: HashMap<TypeId, Box<ObjectSpaceEntryFamily>>,
 }
 
 impl SequentialObjectSpace {
     pub fn new() -> SequentialObjectSpace {
         SequentialObjectSpace {
+            type_lookup_dict: HashMap::new(),
             typeid_entries_dict: HashMap::new(),
         }
     }
@@ -103,6 +106,9 @@ impl ObjectSpace for SequentialObjectSpace {
     fn write<T: Clone + Any>(&mut self, obj: T) {
         let default_entry = ObjectSpaceEntry::<T>::new();
         let type_id = TypeId::of::<T>();
+        self.type_lookup_dict
+            .entry(type_id)
+            .or_insert(Box::new(Type::<T>::new()));
 
         let entry = self.typeid_entries_dict
             .entry(type_id)

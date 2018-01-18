@@ -1,76 +1,92 @@
-use std::any::Any;
+use std::any::{Any, TypeId};
+use std::marker::Unsize;
 use std::marker::PhantomData;
 
 pub trait TypeFamily {
-    fn is_type<U>(t: &Type<U>) -> bool
-    where
-        U: Default + Any;
-    fn is_subtype_of<U>(t: &Type<U>) -> bool
-    where
-        U: Default + Any;
-    fn is_supertype_of<U>(t: &Type<U>) -> bool
-    where
-        U: Default + Any;
+    fn as_any_ref(&self) -> &Any;
+    fn as_any_mut(&mut self) -> &mut Any;
 }
 
-#[derive(Hash, Eq)]
-pub struct Type<T: Default + Any> {
-    marker: PhantomData<T>,
+pub struct Type<T: Any> {
+    obj: PhantomData<T>,
 }
 
 impl<T> Type<T>
 where
-    T: Default + Any,
+    T: Any,
 {
-    fn is_type_helper<U>() -> bool
-    where
-        U: Default + Any,
-    {
-        let obj: &Any = &T::default();
-        obj.is::<U>()
+    pub fn new() -> Type<T> {
+        Type { obj: PhantomData }
     }
 
-    fn is_subtype_of_helper<U>() -> bool
-    where
-        U: Default + Any,
-    {
-        let obj: &Any = &T::default();
-        obj.downcast_ref::<U>().is_some()
+    pub fn from_struct(_: &T) -> Type<T> {
+        Type { obj: PhantomData }
     }
-}
 
-impl<T, U> PartialEq<Type<U>> for Type<T>
-where
-    T: Default + Any,
-    U: Default + Any,
-{
-    fn eq(&self, _: &Type<U>) -> bool {
-        Self::is_type_helper::<U>()
+    fn is_type<U>(&self) -> bool
+    where
+        U: Any,
+    {
+        TypeId::of::<T>() == TypeId::of::<U>()
+    }
+
+    fn is_subtype_of<U>(&self) -> bool
+    where
+        U: ?Sized,
+    {
+        <T as ImplTrait<U>>::has_trait()
     }
 }
 
 impl<T> TypeFamily for Type<T>
 where
-    T: Default + Any,
+    T: Any,
 {
-    fn is_type<U>(_: &Type<U>) -> bool
-    where
-        U: Default + Any,
-    {
-        Self::is_type_helper::<U>()
+    fn as_any_ref(&self) -> &Any {
+        self
     }
 
-    fn is_subtype_of<U>(_: &Type<U>) -> bool
-    where
-        U: Default + Any,
-    {
-        Self::is_subtype_of_helper::<U>()
+    fn as_any_mut(&mut self) -> &mut Any {
+        self
+    }
+}
+
+trait ImplTrait<TraitType: ?Sized> {
+    fn has_trait() -> bool;
+}
+
+default impl<TraitType: ?Sized, T> ImplTrait<TraitType> for T {
+    fn has_trait() -> bool {
+        false
+    }
+}
+
+impl<TraitType: ?Sized, T> ImplTrait<TraitType> for T
+where
+    T: Unsize<TraitType>,
+{
+    fn has_trait() -> bool {
+        true
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fmt::Write;
+
+    #[test]
+    fn is_type() {
+        let string_type = Type::from_struct(&String::from("Hello World"));
+        let str_type = Type::from_struct(&"Hello World");
+        assert!(string_type.is_type::<String>());
+        assert!(!str_type.is_type::<String>());
     }
 
-    fn is_supertype_of<U>(_: &Type<U>) -> bool
-    where
-        U: Default + Any,
-    {
-        Type::<U>::is_subtype_of_helper::<T>()
+    #[test]
+    fn is_subtype_of() {
+        let string = String::from("Hello World");
+        let string_type = Type::from_struct(&string);
+        assert!(string_type.is_subtype_of::<Write>());
     }
 }
