@@ -1,8 +1,13 @@
 use std::any::Any;
 use std::clone::Clone;
 use std::iter::FromIterator;
+use std::collections::BTreeMap;
+use std::collections::HashMap;
+use std::sync::Arc;
+
 use serde_json::value::{to_value, Value};
 use serde_json::map::Map;
+use serde::ser::Serialize;
 
 pub trait ObjectSpaceEntryFamily {
     fn as_any_ref(&self) -> &Any;
@@ -44,40 +49,40 @@ where
         self.object_list.first()
     }
 
-    pub fn get_conditional<P>(&self, cond: &P) -> Option<&T>
-    where
-        P: Fn(&T) -> bool,
-    {
-        match self.object_list.iter().position(cond) {
-            Some(index) => self.object_list.get(index),
-            None => None,
-        }
-    }
+    // pub fn get_conditional<P>(&self, cond: &P) -> Option<&T>
+    // where
+    //     P: Fn(&T) -> bool,
+    // {
+    //     match self.object_list.iter().position(cond) {
+    //         Some(index) => self.object_list.get(index),
+    //         None => None,
+    //     }
+    // }
 
     pub fn get_all(&self) -> Vec<&T> {
         Vec::from_iter(self.object_list.iter())
     }
 
-    pub fn get_all_conditional<P>(&self, cond: P) -> Vec<&T>
-    where
-        for<'r> P: Fn(&'r &T) -> bool,
-    {
-        Vec::from_iter(self.object_list.iter().filter(cond))
-    }
+    // pub fn get_all_conditional<P>(&self, cond: P) -> Vec<&T>
+    // where
+    //     for<'r> P: Fn(&'r &T) -> bool,
+    // {
+    //     Vec::from_iter(self.object_list.iter().filter(cond))
+    // }
 
     pub fn remove(&mut self) -> Option<T> {
         self.object_list.pop()
     }
 
-    pub fn remove_conditional<'a, P>(&mut self, cond: &P) -> Option<T>
-    where
-        P: Fn(&T) -> bool,
-    {
-        self.object_list
-            .iter()
-            .position(cond)
-            .map(|index| self.object_list.remove(index))
-    }
+    // pub fn remove_conditional<'a, P>(&mut self, cond: &P) -> Option<T>
+    // where
+    //     P: Fn(&T) -> bool,
+    // {
+    //     self.object_list
+    //         .iter()
+    //         .position(cond)
+    //         .map(|index| self.object_list.remove(index))
+    // }
 
     pub fn remove_all(&mut self) -> Vec<T> {
         let result = self.object_list.clone();
@@ -85,15 +90,105 @@ where
         result
     }
 
-    pub fn remove_all_conditional<P>(&mut self, cond: P) -> Vec<T>
-    where
-        for<'r> P: Fn(&'r mut T) -> bool,
-    {
-        Vec::from_iter(self.object_list.drain_filter(cond))
-    }
+    // pub fn remove_all_conditional<P>(&mut self, cond: P) -> Vec<T>
+    // where
+    //     for<'r> P: Fn(&'r mut T) -> bool,
+    // {
+    //     Vec::from_iter(self.object_list.drain_filter(cond))
+    // }
 
     fn len(&self) -> usize {
         self.object_list.len()
+    }
+}
+
+enum StructLookupTable {
+    NumberLeaf(BTreeMap<i64, Vec<Arc<Value>>>),
+    BoolLeaf(BTreeMap<bool, Vec<Arc<Value>>>),
+    StringLeaf(BTreeMap<String, Vec<Arc<Value>>>),
+    VecLeaf(Vec<Arc<Value>>),
+    Branch(HashMap<String, StructLookupTable>),
+    Null,
+}
+
+pub struct NewSpaceEntry {
+    table: StructLookupTable,
+}
+
+impl NewSpaceEntry {
+    pub fn as_any_ref(&self) -> &Any {
+        self
+    }
+
+    pub fn as_any_mut(&mut self) -> &mut Any {
+        self
+    }
+
+    pub fn new() -> Self {
+        NewSpaceEntry {
+            table: StructLookupTable::Null,
+        }
+    }
+
+    pub fn add<T>(&mut self, obj: T)
+    where
+        T: Serialize,
+    {
+        match to_value(obj) {
+            Ok(value) => {
+                let flattened_val = flatten(value);
+                match flattened_val.clone() {
+                    Value::Number(number) => {
+                        self.table = StructLookupTable::NumberLeaf(BTreeMap::new())
+                    }
+                    Value::Bool(boolean) => self.add_value_by_bool(boolean, flattened_val),
+                    Value::String(string) => self.add_value_by_string(string, flattened_val),
+                    Value::Array(vec) => self.add_value_by_array(vec, flattened_val),
+                    Value::Object(map) => self.table = StructLookupTable::Branch(HashMap::new()),
+                    _ => (),
+                }
+            }
+            Err(e) => panic!("struct not serializable: {:?}", e),
+        }
+    }
+
+    fn add_value_by_string(&mut self, string: String, value: Value) {
+        if let StructLookupTable::Null = self.table {
+            self.table = StructLookupTable::StringLeaf(BTreeMap::new());
+        }
+
+        match self.table {
+            StructLookupTable::StringLeaf(ref mut map) => {
+                let vec = map.entry(string).or_insert(Vec::new());
+                vec.push(Arc::new(value));
+            }
+            _ => panic!("Incorrect data type! Found String."),
+        }
+    }
+
+    fn add_value_by_bool(&mut self, boolean: bool, value: Value) {
+        if let StructLookupTable::Null = self.table {
+            self.table = StructLookupTable::BoolLeaf(BTreeMap::new());
+        }
+
+        match self.table {
+            StructLookupTable::BoolLeaf(ref mut map) => {
+                let vec = map.entry(boolean).or_insert(Vec::new());
+                vec.push(Arc::new(value));
+            }
+            _ => panic!("Incorrect data type! Found String."),
+        }
+    }
+
+    fn add_value_by_array(&mut self, vec: Vec<Arc<Value>>, value: Value) {
+        if let StructLookupTable::Null = self.table {
+            self.table = StructLookupTable::VecLeaf(Vec::new());
+        }
+
+        match self.table {
+            StructLookupTable::VecLeaf(ref mut vec) => vec.push(Arc::new(value)),
+            _ => panic!("Incorrect data type! Found String."),
+        }
     }
 }
 
