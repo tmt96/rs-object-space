@@ -1,6 +1,8 @@
 use std::any::Any;
 use std::clone::Clone;
 use std::iter::FromIterator;
+use serde_json::value::{to_value, Value};
+use serde_json::map::Map;
 
 pub trait ObjectSpaceEntryFamily {
     fn as_any_ref(&self) -> &Any;
@@ -95,6 +97,64 @@ where
     }
 }
 
+fn flatten(v: Value) -> Value {
+    match v {
+        Value::Object(map) => Value::Object(flatten_value_map(map)),
+        _ => v,
+    }
+}
+
+fn deflatten(v: Value) -> Value {
+    match v {
+        Value::Object(map) => Value::Object(deflatten_value_map(map)),
+        _ => v,
+    }
+}
+
+fn flatten_value_map(map: Map<String, Value>) -> Map<String, Value> {
+    let mut result = Map::new();
+    for (key, value) in map.into_iter() {
+        match value {
+            Value::Object(obj) => for (k, v) in obj.into_iter() {
+                let new_key = format!("{}.{}", key, k);
+                result.insert(new_key, flatten(v));
+            },
+            _ => {
+                result.insert(key, value);
+                ()
+            }
+        };
+    }
+    result
+}
+
+fn deflatten_value_map(map: Map<String, Value>) -> Map<String, Value> {
+    let mut temp = Map::new();
+    let mut result = Map::new();
+    for (key, value) in map.into_iter() {
+        let mut iterator = key.splitn(2, ".");
+        if let Some(newkey) = iterator.next() {
+            match iterator.next() {
+                None => {
+                    result.entry(newkey).or_insert(value);
+                    ()
+                }
+                Some(subkey) => {
+                    let submap = temp.entry(newkey).or_insert(Value::Object(Map::new()));
+                    if let Some(submap) = submap.as_object_mut() {
+                        submap.entry(subkey).or_insert(value);
+                    }
+                }
+            }
+        }
+    }
+
+    for (key, value) in temp.into_iter() {
+        result.insert(key, deflatten(value));
+    }
+    result
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -136,5 +196,4 @@ mod tests {
         assert_eq!(entry.remove_all(), vec!["Hello", "World"]);
         assert_eq!(entry.len(), 0);
     }
-
 }

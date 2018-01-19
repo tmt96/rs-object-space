@@ -4,3 +4,7 @@ version = "0.1.0"
 authors = ["tmt <mt12@williams.edu>"]
 
 [dependencies]
+serde = "1.0"
+serde_json = "1.0"
+num-traits = "0.1.32"
+
