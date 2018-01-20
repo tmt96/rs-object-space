@@ -7,6 +7,7 @@ use std::sync::Arc;
 
 use serde_json::value::{to_value, Value};
 use serde_json::map::Map;
+use serde_json::Number;
 use serde::ser::Serialize;
 
 pub trait ObjectSpaceEntryFamily {
@@ -103,7 +104,7 @@ where
 }
 
 enum StructLookupTable {
-    NumberLeaf(BTreeMap<i64, Vec<Arc<Value>>>),
+    IntLeaf(BTreeMap<i64, Vec<Arc<Value>>>),
     BoolLeaf(BTreeMap<bool, Vec<Arc<Value>>>),
     StringLeaf(BTreeMap<String, Vec<Arc<Value>>>),
     VecLeaf(Vec<Arc<Value>>),
@@ -138,12 +139,14 @@ impl NewSpaceEntry {
             Ok(value) => {
                 let flattened_val = flatten(value);
                 match flattened_val.clone() {
-                    Value::Number(number) => {
-                        self.table = StructLookupTable::NumberLeaf(BTreeMap::new())
+                    Value::Number(num) => self.add_value_by_num(num, Arc::new(flattened_val)),
+                    Value::Bool(boolean) => {
+                        self.add_value_by_bool(boolean, Arc::new(flattened_val))
                     }
-                    Value::Bool(boolean) => self.add_value_by_bool(boolean, flattened_val),
-                    Value::String(string) => self.add_value_by_string(string, flattened_val),
-                    Value::Array(vec) => self.add_value_by_array(vec, flattened_val),
+                    Value::String(string) => {
+                        self.add_value_by_string(string, Arc::new(flattened_val))
+                    }
+                    Value::Array(vec) => self.add_value_by_array(vec, Arc::new(flattened_val)),
                     Value::Object(map) => self.table = StructLookupTable::Branch(HashMap::new()),
                     _ => (),
                 }
@@ -152,7 +155,33 @@ impl NewSpaceEntry {
         }
     }
 
-    fn add_value_by_string(&mut self, string: String, value: Value) {
+    fn add_value_by_num(&mut self, num: Number, value: Arc<Value>) {
+        if let Some(i) = value.as_i64() {
+            self.add_value_by_int(i, value);
+        } else if let Some(f) = value.as_f64() {
+            self.add_value_by_float(f, value);
+        } else {
+            panic!("Not a number!");
+        }
+    }
+
+    fn add_value_by_int(&mut self, i: i64, value: Arc<Value>) {
+        if let StructLookupTable::Null = self.table {
+            self.table = StructLookupTable::IntLeaf(BTreeMap::new());
+        }
+
+        match self.table {
+            StructLookupTable::IntLeaf(ref mut map) => {
+                let vec = map.entry(i).or_insert(Vec::new());
+                vec.push(value);
+            }
+            _ => panic!("Incorrect data type! Found int."),
+        }
+    }
+
+    fn add_value_by_float(&mut self, f: f64, value: Arc<Value>) {}
+
+    fn add_value_by_string(&mut self, string: String, value: Arc<Value>) {
         if let StructLookupTable::Null = self.table {
             self.table = StructLookupTable::StringLeaf(BTreeMap::new());
         }
@@ -160,13 +189,13 @@ impl NewSpaceEntry {
         match self.table {
             StructLookupTable::StringLeaf(ref mut map) => {
                 let vec = map.entry(string).or_insert(Vec::new());
-                vec.push(Arc::new(value));
+                vec.push(value);
             }
             _ => panic!("Incorrect data type! Found String."),
         }
     }
 
-    fn add_value_by_bool(&mut self, boolean: bool, value: Value) {
+    fn add_value_by_bool(&mut self, boolean: bool, value: Arc<Value>) {
         if let StructLookupTable::Null = self.table {
             self.table = StructLookupTable::BoolLeaf(BTreeMap::new());
         }
@@ -174,20 +203,33 @@ impl NewSpaceEntry {
         match self.table {
             StructLookupTable::BoolLeaf(ref mut map) => {
                 let vec = map.entry(boolean).or_insert(Vec::new());
-                vec.push(Arc::new(value));
+                vec.push(value);
             }
-            _ => panic!("Incorrect data type! Found String."),
+            _ => panic!("Incorrect data type! Found bool."),
         }
     }
 
-    fn add_value_by_array(&mut self, vec: Vec<Arc<Value>>, value: Value) {
+    fn add_value_by_array(&mut self, vec: Vec<Value>, value: Arc<Value>) {
         if let StructLookupTable::Null = self.table {
             self.table = StructLookupTable::VecLeaf(Vec::new());
         }
 
         match self.table {
-            StructLookupTable::VecLeaf(ref mut vec) => vec.push(Arc::new(value)),
-            _ => panic!("Incorrect data type! Found String."),
+            StructLookupTable::VecLeaf(ref mut vec) => vec.push(value),
+            _ => panic!("Incorrect data type! Found vec."),
+        }
+    }
+
+    fn add_value_by_object(&mut self, map: Map<String, Value>, value: Arc<Value>) {
+        if let StructLookupTable::Null = self.table {
+            self.table = StructLookupTable::Branch(HashMap::new());
+        }
+
+        match self.table {
+            StructLookupTable::Branch(ref mut hashmap) => for (key, val) in map.into_iter() {
+                map.entry(key).or_insert(default)
+            },
+            _ => panic!("Incorrect data type! Found object."),
         }
     }
 }
