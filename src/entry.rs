@@ -4,11 +4,13 @@ use std::iter::FromIterator;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::borrow::Borrow;
 
-use serde_json::value::{to_value, Value};
+use serde_json::value::{from_value, to_value, Value};
 use serde_json::map::Map;
 use serde_json::Number;
 use serde::ser::Serialize;
+use serde::de::Deserialize;
 
 pub trait ObjectSpaceEntryFamily {
     fn as_any_ref(&self) -> &Any;
@@ -103,20 +105,16 @@ where
     }
 }
 
-enum StructLookupTable {
+enum TreeSpaceEntry {
     IntLeaf(BTreeMap<i64, Vec<Arc<Value>>>),
     BoolLeaf(BTreeMap<bool, Vec<Arc<Value>>>),
     StringLeaf(BTreeMap<String, Vec<Arc<Value>>>),
     VecLeaf(Vec<Arc<Value>>),
-    Branch(HashMap<String, StructLookupTable>),
+    Branch(HashMap<String, TreeSpaceEntry>),
     Null,
 }
 
-pub struct NewSpaceEntry {
-    table: StructLookupTable,
-}
-
-impl NewSpaceEntry {
+impl TreeSpaceEntry {
     pub fn as_any_ref(&self) -> &Any {
         self
     }
@@ -126,9 +124,7 @@ impl NewSpaceEntry {
     }
 
     pub fn new() -> Self {
-        NewSpaceEntry {
-            table: StructLookupTable::Null,
-        }
+        TreeSpaceEntry::Null
     }
 
     pub fn add<T>(&mut self, obj: T)
@@ -147,12 +143,47 @@ impl NewSpaceEntry {
                         self.add_value_by_string(string, Arc::new(flattened_val))
                     }
                     Value::Array(vec) => self.add_value_by_array(vec, Arc::new(flattened_val)),
-                    Value::Object(map) => self.table = StructLookupTable::Branch(HashMap::new()),
+                    Value::Object(map) => self.add_value_by_object(map, Arc::new(flattened_val)),
                     _ => (),
                 }
             }
             Err(e) => panic!("struct not serializable: {:?}", e),
         }
+    }
+
+    pub fn get<T>(&self) -> Option<T>
+    where
+        for<'de> T: Deserialize<'de>,
+    {
+        match *self {
+            TreeSpaceEntry::Null => None,
+            TreeSpaceEntry::BoolLeaf(ref bool_map) => get_primitive_from_map(bool_map),
+            TreeSpaceEntry::Branch(ref object_field_map) => None,
+            TreeSpaceEntry::IntLeaf(ref int_map) => get_primitive_from_map(int_map),
+            TreeSpaceEntry::StringLeaf(ref string_map) => get_primitive_from_map(string_map),
+            TreeSpaceEntry::VecLeaf(ref vec) => None,
+        }
+    }
+
+    pub fn get_all<'de, T>(&self) -> Vec<&T>
+    where
+        T: Deserialize<'de>,
+    {
+        Vec::new()
+    }
+
+    pub fn remove<'de, T>(&mut self) -> Option<T>
+    where
+        T: Deserialize<'de>,
+    {
+        None
+    }
+
+    pub fn remove_all<'de, T>(&mut self) -> Vec<T>
+    where
+        T: Deserialize<'de>,
+    {
+        Vec::new()
     }
 
     fn add_value_by_num(&mut self, num: Number, value: Arc<Value>) {
@@ -166,12 +197,12 @@ impl NewSpaceEntry {
     }
 
     fn add_value_by_int(&mut self, i: i64, value: Arc<Value>) {
-        if let StructLookupTable::Null = self.table {
-            self.table = StructLookupTable::IntLeaf(BTreeMap::new());
+        if let &mut TreeSpaceEntry::Null = self {
+            *self = TreeSpaceEntry::IntLeaf(BTreeMap::new());
         }
 
-        match self.table {
-            StructLookupTable::IntLeaf(ref mut map) => {
+        match *self {
+            TreeSpaceEntry::IntLeaf(ref mut map) => {
                 let vec = map.entry(i).or_insert(Vec::new());
                 vec.push(value);
             }
@@ -182,12 +213,12 @@ impl NewSpaceEntry {
     fn add_value_by_float(&mut self, f: f64, value: Arc<Value>) {}
 
     fn add_value_by_string(&mut self, string: String, value: Arc<Value>) {
-        if let StructLookupTable::Null = self.table {
-            self.table = StructLookupTable::StringLeaf(BTreeMap::new());
+        if let &mut TreeSpaceEntry::Null = self {
+            *self = TreeSpaceEntry::StringLeaf(BTreeMap::new());
         }
 
-        match self.table {
-            StructLookupTable::StringLeaf(ref mut map) => {
+        match *self {
+            TreeSpaceEntry::StringLeaf(ref mut map) => {
                 let vec = map.entry(string).or_insert(Vec::new());
                 vec.push(value);
             }
@@ -196,12 +227,12 @@ impl NewSpaceEntry {
     }
 
     fn add_value_by_bool(&mut self, boolean: bool, value: Arc<Value>) {
-        if let StructLookupTable::Null = self.table {
-            self.table = StructLookupTable::BoolLeaf(BTreeMap::new());
+        if let &mut TreeSpaceEntry::Null = self {
+            *self = TreeSpaceEntry::BoolLeaf(BTreeMap::new());
         }
 
-        match self.table {
-            StructLookupTable::BoolLeaf(ref mut map) => {
+        match *self {
+            TreeSpaceEntry::BoolLeaf(ref mut map) => {
                 let vec = map.entry(boolean).or_insert(Vec::new());
                 vec.push(value);
             }
@@ -210,28 +241,49 @@ impl NewSpaceEntry {
     }
 
     fn add_value_by_array(&mut self, vec: Vec<Value>, value: Arc<Value>) {
-        if let StructLookupTable::Null = self.table {
-            self.table = StructLookupTable::VecLeaf(Vec::new());
+        if let &mut TreeSpaceEntry::Null = self {
+            *self = TreeSpaceEntry::VecLeaf(Vec::new());
         }
 
-        match self.table {
-            StructLookupTable::VecLeaf(ref mut vec) => vec.push(value),
+        match *self {
+            TreeSpaceEntry::VecLeaf(ref mut vec) => vec.push(value),
             _ => panic!("Incorrect data type! Found vec."),
         }
     }
 
     fn add_value_by_object(&mut self, map: Map<String, Value>, value: Arc<Value>) {
-        if let StructLookupTable::Null = self.table {
-            self.table = StructLookupTable::Branch(HashMap::new());
+        if let &mut TreeSpaceEntry::Null = self {
+            *self = TreeSpaceEntry::Branch(HashMap::new());
         }
 
-        match self.table {
-            StructLookupTable::Branch(ref mut hashmap) => for (key, val) in map.into_iter() {
-                map.entry(key).or_insert(default)
+        match *self {
+            TreeSpaceEntry::Branch(ref mut hashmap) => for (key, val) in map.into_iter() {
+                let sub_entry = hashmap.entry(key).or_insert(TreeSpaceEntry::Null);
+                match val.clone() {
+                    Value::Number(num) => sub_entry.add_value_by_num(num, value.clone()),
+                    Value::Bool(boolean) => sub_entry.add_value_by_bool(boolean, value.clone()),
+                    Value::String(string) => sub_entry.add_value_by_string(string, value.clone()),
+                    Value::Array(vec) => sub_entry.add_value_by_array(vec, value.clone()),
+                    Value::Object(map) => panic!("Incorrect data type! Found object."),
+                    _ => (),
+                }
             },
             _ => panic!("Incorrect data type! Found object."),
         }
     }
+}
+
+fn get_primitive_from_map<T, U>(map: &BTreeMap<U, Vec<Arc<Value>>>) -> Option<T>
+where
+    for<'de> T: Deserialize<'de>,
+{
+    while let Some((_, vec)) = map.iter().next() {
+        if let Some(result) = vec.get(0) {
+            let val: &Value = result.borrow();
+            return from_value(deflatten(val.clone())).ok();
+        }
+    }
+    None
 }
 
 fn flatten(v: Value) -> Value {
