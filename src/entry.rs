@@ -1,11 +1,10 @@
 use std::any::Any;
 use std::clone::Clone;
-use std::iter::{empty, FromIterator};
+use std::iter::empty;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::borrow::Borrow;
-use std::fmt::Debug;
 
 use serde_json::value::{from_value, to_value, Value};
 use serde_json::map::Map;
@@ -13,100 +12,7 @@ use serde_json::Number;
 use serde::ser::Serialize;
 use serde::de::Deserialize;
 
-pub trait ObjectSpaceEntryFamily {
-    fn as_any_ref(&self) -> &Any;
-    fn as_any_mut(&mut self) -> &mut Any;
-}
-
-pub struct ObjectSpaceEntry<T: Clone + Any> {
-    object_list: Vec<T>,
-}
-
-impl<T> ObjectSpaceEntryFamily for ObjectSpaceEntry<T>
-where
-    T: Clone + Any,
-{
-    fn as_any_ref(&self) -> &Any {
-        self
-    }
-
-    fn as_any_mut(&mut self) -> &mut Any {
-        self
-    }
-}
-
-impl<T> ObjectSpaceEntry<T>
-where
-    T: Clone + Any,
-{
-    pub fn new() -> ObjectSpaceEntry<T> {
-        ObjectSpaceEntry::<T> {
-            object_list: Vec::new(),
-        }
-    }
-
-    pub fn add(&mut self, obj: T) {
-        &self.object_list.push(obj);
-    }
-
-    pub fn get(&self) -> Option<&T> {
-        self.object_list.first()
-    }
-
-    // pub fn get_conditional<P>(&self, cond: &P) -> Option<&T>
-    // where
-    //     P: Fn(&T) -> bool,
-    // {
-    //     match self.object_list.iter().position(cond) {
-    //         Some(index) => self.object_list.get(index),
-    //         None => None,
-    //     }
-    // }
-
-    pub fn get_all(&self) -> Vec<&T> {
-        Vec::from_iter(self.object_list.iter())
-    }
-
-    // pub fn get_all_conditional<P>(&self, cond: P) -> Vec<&T>
-    // where
-    //     for<'r> P: Fn(&'r &T) -> bool,
-    // {
-    //     Vec::from_iter(self.object_list.iter().filter(cond))
-    // }
-
-    pub fn remove(&mut self) -> Option<T> {
-        self.object_list.pop()
-    }
-
-    // pub fn remove_conditional<'a, P>(&mut self, cond: &P) -> Option<T>
-    // where
-    //     P: Fn(&T) -> bool,
-    // {
-    //     self.object_list
-    //         .iter()
-    //         .position(cond)
-    //         .map(|index| self.object_list.remove(index))
-    // }
-
-    pub fn remove_all(&mut self) -> Vec<T> {
-        let result = self.object_list.clone();
-        self.object_list = Vec::new();
-        result
-    }
-
-    // pub fn remove_all_conditional<P>(&mut self, cond: P) -> Vec<T>
-    // where
-    //     for<'r> P: Fn(&'r mut T) -> bool,
-    // {
-    //     Vec::from_iter(self.object_list.drain_filter(cond))
-    // }
-
-    fn len(&self) -> usize {
-        self.object_list.len()
-    }
-}
-
-enum TreeSpaceEntry {
+pub enum TreeSpaceEntry {
     IntLeaf(BTreeMap<i64, Vec<Arc<Value>>>),
     BoolLeaf(BTreeMap<bool, Vec<Arc<Value>>>),
     StringLeaf(BTreeMap<String, Vec<Arc<Value>>>),
@@ -179,7 +85,7 @@ impl TreeSpaceEntry {
 
     pub fn get_all<'a, T>(&'a self) -> Box<Iterator<Item = T> + 'a>
     where
-        for<'de> T: Deserialize<'de> + 'a,
+        for<'de> T: Deserialize<'de> + 'static,
     {
         match *self {
             TreeSpaceEntry::Null => Box::new(empty()),
@@ -212,9 +118,9 @@ impl TreeSpaceEntry {
         }
     }
 
-    pub fn remove_all<T>(&mut self) -> Vec<T>
+    pub fn remove_all<'a, T>(&'a mut self) -> Vec<T>
     where
-        for<'de> T: Deserialize<'de>,
+        for<'de> T: Deserialize<'de> + 'static,
     {
         let result = self.get_all::<T>().collect();
         match *self {
@@ -263,7 +169,7 @@ impl TreeSpaceEntry {
         }
     }
 
-    fn add_value_by_float(&mut self, f: f64, value: Arc<Value>) {}
+    fn add_value_by_float(&mut self, _f: f64, _value: Arc<Value>) {}
 
     fn add_value_by_string(&mut self, string: String, value: Arc<Value>) {
         if let &mut TreeSpaceEntry::Null = self {
@@ -293,7 +199,7 @@ impl TreeSpaceEntry {
         }
     }
 
-    fn add_value_by_array(&mut self, vec: Vec<Value>, value: Arc<Value>) {
+    fn add_value_by_array(&mut self, _: Vec<Value>, value: Arc<Value>) {
         if let &mut TreeSpaceEntry::Null = self {
             *self = TreeSpaceEntry::VecLeaf(Vec::new());
         }
@@ -317,7 +223,7 @@ impl TreeSpaceEntry {
                     Value::Bool(boolean) => sub_entry.add_value_by_bool(boolean, value.clone()),
                     Value::String(string) => sub_entry.add_value_by_string(string, value.clone()),
                     Value::Array(vec) => sub_entry.add_value_by_array(vec, value.clone()),
-                    Value::Object(map) => panic!("Incorrect data type! Found object."),
+                    Value::Object(_) => panic!("Incorrect data type! Found object."),
                     _ => (),
                 }
             },
@@ -344,7 +250,7 @@ fn get_all_prims_from_map<'a, T, U>(
     map: &'a BTreeMap<U, Vec<Arc<Value>>>,
 ) -> Box<Iterator<Item = T> + 'a>
 where
-    for<'de> T: Deserialize<'de>,
+    for<'de> T: Deserialize<'de> + 'static,
 {
     let iter = map.iter().flat_map(|(_, vec)| {
         vec.iter().filter_map(|item| {

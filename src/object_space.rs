@@ -1,127 +1,117 @@
 use std::collections::HashMap;
-use std::any::{Any, TypeId};
+use std::any::TypeId;
 use std::iter;
-use entry::{ObjectSpaceEntry, ObjectSpaceEntryFamily};
-use type_box::{Type, TypeFamily};
+use entry::TreeSpaceEntry;
+use serde::{Deserialize, Serialize};
 
 pub trait ObjectSpace {
     fn write<T>(&mut self, obj: T)
     where
-        T: Clone + Any;
+        for<'de> T: Serialize + Deserialize<'de> + 'static;
 
-    fn try_read<T>(&self) -> Option<&T>
+    fn try_read<T>(&self) -> Option<T>
     where
-        T: Clone + Any;
+        for<'de> T: Serialize + Deserialize<'de> + 'static;
 
     // fn try_read_conditional<P, T>(&self, cond: &P) -> Option<&T>
     // where
     //     P: Fn(&T) -> bool,
-    //     T: Clone + Any;
+    //     for <'de> T: Serialize + Deserialize<'de>;
 
-    fn read_all<'a, T>(&'a self) -> Box<Iterator<Item = &T> + 'a>
+    fn read_all<'a, T>(&'a self) -> Box<Iterator<Item = T> + 'a>
     where
-        T: Clone + Any;
+        for<'de> T: Serialize + Deserialize<'de> + 'static;
 
     // fn read_all_conditional<'a, P, T>(&'a self, cond: P) -> Box<Iterator<Item = &T> + 'a>
     // where
     //     for<'r> P: Fn(&'r &T) -> bool + 'a,
-    //     T: Clone + Any;
+    //     for <'de> T: Serialize + Deserialize<'de>;
 
-    fn read<T>(&self) -> &T
+    fn read<T>(&self) -> T
     where
-        T: Clone + Any;
+        for<'de> T: Serialize + Deserialize<'de> + 'static;
 
     // fn read_conditional<P, T>(&self, cond: &P) -> &T
     // where
     //     P: Fn(&T) -> bool,
-    //     T: Clone + Any;
+    //     for <'de> T: Serialize + Deserialize<'de>;
 
     fn try_take<T>(&mut self) -> Option<T>
     where
-        T: Clone + Any;
+        for<'de> T: Serialize + Deserialize<'de> + 'static;
 
     // fn try_take_conditional<P, T>(&mut self, cond: &P) -> Option<T>
     // where
     //     P: Fn(&T) -> bool,
-    //     T: Clone + Any;
+    //     for <'de> T: Serialize + Deserialize<'de>;
 
     fn take_all<'a, T>(&'a mut self) -> Box<Iterator<Item = T> + 'a>
     where
-        T: Clone + Any;
+        for<'de> T: Serialize + Deserialize<'de> + 'static;
 
     // fn take_all_conditional<'a, P, T>(&'a mut self, cond: P) -> Box<Iterator<Item = T> + 'a>
     // where
     //     for<'r> P: Fn(&'r mut T) -> bool + 'a,
-    //     T: Clone + Any;
+    //     for <'de> T: Serialize + Deserialize<'de>;
 
     fn take<T>(&mut self) -> T
     where
-        T: Clone + Any;
+        for<'de> T: Serialize + Deserialize<'de> + 'static;
 
     // fn take_conditional<P, T>(&mut self, cond: &P) -> T
     // where
     //     P: Fn(&T) -> bool,
-    //     T: Clone + Any;
+    //     for <'de> T: Serialize + Deserialize<'de>;
 }
 
 pub struct SequentialObjectSpace {
-    type_lookup_dict: HashMap<TypeId, Box<TypeFamily>>,
-    typeid_entries_dict: HashMap<TypeId, Box<ObjectSpaceEntryFamily>>,
+    typeid_entries_dict: HashMap<TypeId, TreeSpaceEntry>,
 }
 
 impl SequentialObjectSpace {
     pub fn new() -> SequentialObjectSpace {
         SequentialObjectSpace {
-            type_lookup_dict: HashMap::new(),
             typeid_entries_dict: HashMap::new(),
         }
     }
 
-    fn get_object_entry_ref<T>(&self) -> Option<&ObjectSpaceEntry<T>>
+    fn get_object_entry_ref<T>(&self) -> Option<&TreeSpaceEntry>
     where
-        T: Clone + Any,
+        T: 'static,
     {
         let type_id = TypeId::of::<T>();
-
-        match self.typeid_entries_dict.get(&type_id) {
-            Some(entry) => entry.as_any_ref().downcast_ref::<ObjectSpaceEntry<T>>(),
-            _ => None,
-        }
+        self.typeid_entries_dict.get(&type_id)
     }
 
-    fn get_object_entry_mut<T>(&mut self) -> Option<&mut ObjectSpaceEntry<T>>
+    fn get_object_entry_mut<T>(&mut self) -> Option<&mut TreeSpaceEntry>
     where
-        T: Clone + Any,
+        T: 'static,
     {
         let type_id = TypeId::of::<T>();
-
-        match self.typeid_entries_dict.get_mut(&type_id) {
-            Some(entry) => entry.as_any_mut().downcast_mut::<ObjectSpaceEntry<T>>(),
-            _ => None,
-        }
+        self.typeid_entries_dict.get_mut(&type_id)
     }
 }
 
 impl ObjectSpace for SequentialObjectSpace {
-    fn write<T: Clone + Any>(&mut self, obj: T) {
-        let default_entry = ObjectSpaceEntry::<T>::new();
+    fn write<T>(&mut self, obj: T)
+    where
+        for<'de> T: Serialize + Deserialize<'de> + 'static,
+    {
+        let default_entry = TreeSpaceEntry::new();
         let type_id = TypeId::of::<T>();
-        self.type_lookup_dict
-            .entry(type_id)
-            .or_insert(Box::new(Type::<T>::new()));
 
-        let entry = self.typeid_entries_dict
+        self.typeid_entries_dict
             .entry(type_id)
-            .or_insert(Box::new(default_entry));
-
-        if let Some(ent) = entry.as_any_mut().downcast_mut::<ObjectSpaceEntry<T>>() {
-            ent.add(obj);
-        }
+            .or_insert(default_entry)
+            .add(obj);
     }
 
-    fn try_read<T: Clone + Any>(&self) -> Option<&T> {
+    fn try_read<T>(&self) -> Option<T>
+    where
+        for<'de> T: Serialize + Deserialize<'de> + 'static,
+    {
         match self.get_object_entry_ref::<T>() {
-            Some(entry) => entry.get(),
+            Some(entry) => entry.get::<T>(),
             _ => None,
         }
     }
@@ -129,7 +119,7 @@ impl ObjectSpace for SequentialObjectSpace {
     // fn try_read_conditional<P, T>(&self, cond: &P) -> Option<&T>
     // where
     //     P: Fn(&T) -> bool,
-    //     T: Clone + Any,
+    //     for <'de> T: Serialize + Deserialize<'de>,
     // {
     //     match self.get_object_entry_ref::<T>() {
     //         Some(entry) => entry.get_conditional(cond),
@@ -137,20 +127,20 @@ impl ObjectSpace for SequentialObjectSpace {
     //     }
     // }
 
-    fn read_all<'a, T>(&'a self) -> Box<Iterator<Item = &T> + 'a>
+    fn read_all<'a, T>(&'a self) -> Box<Iterator<Item = T> + 'a>
     where
-        T: Clone + Any,
+        for<'de> T: Serialize + Deserialize<'de> + 'static,
     {
         match self.get_object_entry_ref::<T>() {
-            Some(ent) => Box::new(ent.get_all().into_iter()),
-            None => Box::new(iter::empty::<&T>()),
+            Some(ent) => Box::new(ent.get_all::<T>()),
+            None => Box::new(iter::empty::<T>()),
         }
     }
 
     // fn read_all_conditional<'a, P, T>(&'a self, cond: P) -> Box<Iterator<Item = &T> + 'a>
     // where
     //     for<'r> P: Fn(&'r &T) -> bool + 'a,
-    //     T: Clone + Any,
+    //     for <'de> T: Serialize + Deserialize<'de>,
     // {
     //     match self.get_object_entry_ref::<T>() {
     //         Some(ent) => Box::new(ent.get_all_conditional(cond).into_iter()),
@@ -158,9 +148,9 @@ impl ObjectSpace for SequentialObjectSpace {
     //     }
     // }
 
-    fn read<T>(&self) -> &T
+    fn read<T>(&self) -> T
     where
-        T: Clone + Any,
+        for<'de> T: Serialize + Deserialize<'de> + 'static,
     {
         loop {
             if let Some(item) = self.try_read::<T>() {
@@ -172,7 +162,7 @@ impl ObjectSpace for SequentialObjectSpace {
     // fn read_conditional<P, T>(&self, cond: &P) -> &T
     // where
     //     P: Fn(&T) -> bool,
-    //     T: Clone + Any,
+    //     for <'de> T: Serialize + Deserialize<'de>,
     // {
     //     loop {
     //         if let Some(item) = self.try_read_conditional::<P, T>(cond) {
@@ -181,9 +171,12 @@ impl ObjectSpace for SequentialObjectSpace {
     //     }
     // }
 
-    fn try_take<T: Clone + Any>(&mut self) -> Option<T> {
+    fn try_take<T>(&mut self) -> Option<T>
+    where
+        for<'de> T: Serialize + Deserialize<'de> + 'static,
+    {
         match self.get_object_entry_mut::<T>() {
-            Some(ent) => ent.remove(),
+            Some(ent) => ent.remove::<T>(),
             None => None,
         }
     }
@@ -191,7 +184,7 @@ impl ObjectSpace for SequentialObjectSpace {
     // fn try_take_conditional<P, T>(&mut self, cond: &P) -> Option<T>
     // where
     //     P: Fn(&T) -> bool,
-    //     T: Clone + Any,
+    //     for <'de> T: Serialize + Deserialize<'de>,
     // {
     //     match self.get_object_entry_mut::<T>() {
     //         Some(ent) => ent.remove_conditional(cond),
@@ -201,10 +194,10 @@ impl ObjectSpace for SequentialObjectSpace {
 
     fn take_all<'a, T>(&'a mut self) -> Box<Iterator<Item = T> + 'a>
     where
-        T: Clone + Any,
+        for<'de> T: Serialize + Deserialize<'de> + 'static,
     {
         match self.get_object_entry_mut::<T>() {
-            Some(entry) => Box::new(entry.remove_all().into_iter()),
+            Some(entry) => Box::new(entry.remove_all::<T>().into_iter()),
             None => Box::new(iter::empty::<T>()),
         }
     }
@@ -212,7 +205,7 @@ impl ObjectSpace for SequentialObjectSpace {
     // fn take_all_conditional<'a, P, T>(&'a mut self, cond: P) -> Box<Iterator<Item = T> + 'a>
     // where
     //     for<'r> P: Fn(&'r mut T) -> bool + 'a,
-    //     T: Clone + Any,
+    //     for <'de> T: Serialize + Deserialize<'de>,
     // {
     //     match self.get_object_entry_mut::<T>() {
     //         Some(entry) => Box::new(entry.remove_all_conditional(cond).into_iter()),
@@ -222,7 +215,7 @@ impl ObjectSpace for SequentialObjectSpace {
 
     fn take<T>(&mut self) -> T
     where
-        T: Clone + Any,
+        for<'de> T: Serialize + Deserialize<'de> + 'static,
     {
         loop {
             if let Some(item) = self.try_take::<T>() {
@@ -234,7 +227,7 @@ impl ObjectSpace for SequentialObjectSpace {
     // fn take_conditional<P, T>(&mut self, cond: &P) -> T
     // where
     //     P: Fn(&T) -> bool,
-    //     T: Clone + Any,
+    //     for <'de> T: Serialize + Deserialize<'de>,
     // {
     //     loop {
     //         if let Some(item) = self.try_take_conditional::<P, T>(cond) {
