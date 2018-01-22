@@ -216,7 +216,16 @@ impl TreeSpaceEntry {
     where
         for<'de> T: Deserialize<'de>,
     {
-        Vec::new()
+        let result = self.get_all::<T>().collect();
+        match *self {
+            TreeSpaceEntry::BoolLeaf(ref mut bool_map) => *bool_map = BTreeMap::new(),
+            TreeSpaceEntry::IntLeaf(ref mut int_map) => *int_map = BTreeMap::new(),
+            TreeSpaceEntry::StringLeaf(ref mut string_map) => *string_map = BTreeMap::new(),
+            TreeSpaceEntry::VecLeaf(ref mut vec) => *vec = Vec::new(),
+            TreeSpaceEntry::Branch(ref mut object_field_map) => *object_field_map = HashMap::new(),
+            _ => (),
+        }
+        result
     }
 
     fn remove_helper(&mut self) -> Option<Arc<Value>> {
@@ -461,7 +470,6 @@ mod tests {
     struct TestStruct {
         count: i32,
         name: String,
-        eaten: bool,
     }
 
     #[test]
@@ -514,21 +522,24 @@ mod tests {
 
     #[test]
     fn get_all() {
-        let mut entry = ObjectSpaceEntry::<String>::new();
-        assert_eq!(entry.get_all().len(), 0);
+        let mut entry = TreeSpaceEntry::new();
+        assert_eq!(entry.get_all::<String>().count(), 0);
         entry.add("Hello".to_string());
         entry.add("World".to_string());
-        assert_eq!(entry.get_all(), vec!["Hello", "World"]);
-        assert_ne!(entry.len(), 0);
+        assert_eq!(
+            entry.get_all::<String>().collect::<Vec<String>>(),
+            vec!["Hello", "World"]
+        );
+        assert_ne!(entry.get_all::<String>().count(), 0);
     }
 
     #[test]
     fn remove_all() {
-        let mut entry = ObjectSpaceEntry::<String>::new();
-        assert_eq!(entry.remove_all().len(), 0);
+        let mut entry = TreeSpaceEntry::new();
+        assert_eq!(entry.remove_all::<String>().len(), 0);
         entry.add("Hello".to_string());
         entry.add("World".to_string());
-        assert_eq!(entry.remove_all(), vec!["Hello", "World"]);
-        assert_eq!(entry.len(), 0);
+        assert_eq!(entry.remove_all::<String>(), vec!["Hello", "World"]);
+        assert_eq!(entry.remove_all::<String>().len(), 0);
     }
 }
