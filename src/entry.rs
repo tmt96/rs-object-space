@@ -189,7 +189,7 @@ impl TreeSpaceEntry {
         match *self {
             TreeSpaceEntry::Null => None,
             TreeSpaceEntry::IntLeaf(ref mut int_map) => {
-                get_primitive_conditional(int_map, condition)
+                remove_primitive_conditional(int_map, condition)
             }
             TreeSpaceEntry::Branch(ref mut object_field_map) => {
                 let arc = match object_field_map.get_mut(field) {
@@ -204,6 +204,30 @@ impl TreeSpaceEntry {
                     }
                     None => None,
                 }
+            }
+            _ => panic!("Not an int type or a struct holding an int"),
+        }
+    }
+
+    fn remove_all_int_conditional<R>(&mut self, field: &str, condition: R) -> Vec<Arc<Value>>
+    where
+        R: RangeArgument<i64>,
+    {
+        match *self {
+            TreeSpaceEntry::Null => Vec::new(),
+            TreeSpaceEntry::IntLeaf(ref mut int_map) => {
+                remove_all_prims_conditional(int_map, condition)
+            }
+            TreeSpaceEntry::Branch(ref mut field_map) => {
+                let arc_list = match field_map.get_mut(field) {
+                    None => panic!("Field {} does not exist", field),
+                    Some(entry) => entry.remove_all_int_conditional(field, condition),
+                };
+
+                for arc in arc_list.iter() {
+                    remove_value_arc(field_map, arc);
+                }
+                arc_list
             }
             _ => panic!("Not an int type or a struct holding an int"),
         }
@@ -350,12 +374,13 @@ impl ConditionalEntry<i64> for TreeSpaceEntry {
         for<'de> T: Deserialize<'de> + 'static,
         R: RangeArgument<i64>,
     {
-        match *self {
-            TreeSpaceEntry::Null => Vec::new(),
-            TreeSpaceEntry::IntLeaf(ref int_map) => Vec::new(),
-            TreeSpaceEntry::Branch(ref field_map) => Vec::new(),
-            _ => panic!("Not an int type or a struct holding an int"),
-        }
+        self.remove_all_int_conditional(field, condition)
+            .into_iter()
+            .filter_map(|arc| match Arc::try_unwrap(arc) {
+                Ok(value) => from_value(deflatten(value)).ok(),
+                Err(_) => None,
+            })
+            .collect()
     }
 }
 
@@ -419,6 +444,23 @@ where
     Box::new(iter)
 }
 
+fn remove_primitive_conditional<R, U>(
+    map: &mut BTreeMap<U, Vec<Arc<Value>>>,
+    condition: R,
+) -> Option<Arc<Value>>
+where
+    R: RangeArgument<U>,
+    U: Ord,
+{
+    let mut iter = map.range_mut(condition);
+    while let Some((_, vec)) = iter.next() {
+        if let Some(result) = vec.pop() {
+            return Some(result.clone());
+        }
+    }
+    None
+}
+
 fn remove_all_prims_conditional<'a, R, U>(
     map: &'a mut BTreeMap<U, Vec<Arc<Value>>>,
     condition: R,
@@ -427,22 +469,9 @@ where
     R: RangeArgument<U>,
     U: Ord,
 {
-    // let keys: Vec<&U>;
-    // let result;
-    // {
-    //     let (temp_keys, temp_values): (Vec<_>, Vec<_>) = map.range(condition).unzip();
-    //     keys = temp_keys.iter().map(|key| (*key).clone()).collect();
-    //     result = temp_values
-    //         .iter()
-    //         .flat_map(|vec| vec.iter().map(|item| item.clone()))
-    //         .collect();
-    // }
-    // // let (keys, values): (Vec<_>, Vec<_>) = map.range(condition).unzip();
-    // for key in keys {
-    //     let clone = key.clone();
-    //     map.remove(clone);
-    // }
-    // result
+    map.range_mut(condition)
+        .flat_map(|(_, vec)| vec.drain(..))
+        .collect()
 }
 
 fn remove_primitive_from_map<U>(map: &mut BTreeMap<U, Vec<Arc<Value>>>) -> Option<Arc<Value>> {
