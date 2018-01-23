@@ -2,7 +2,6 @@ use std::iter::empty;
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 use std::borrow::Borrow;
-use std::cmp::Ord;
 use std::iter::IntoIterator;
 
 use serde_json::value::{from_value, to_value, Value};
@@ -12,31 +11,12 @@ use serde::ser::Serialize;
 use serde::de::Deserialize;
 use std::collections::range::RangeArgument;
 
-trait ConditionalEntry<U> {
-    fn get_conditional<R, T>(&self, field: &str, condition: R) -> Option<T>
-    where
-        for<'de> T: Serialize + Deserialize<'de>,
-        R: RangeArgument<U>;
+mod conditional_entry;
+mod helpers;
 
-    fn get_all_conditional<'a, R, T>(
-        &'a self,
-        field: &str,
-        condition: R,
-    ) -> Box<Iterator<Item = T> + 'a>
-    where
-        for<'de> T: Deserialize<'de> + 'static,
-        R: RangeArgument<U>;
-
-    fn remove_conditional<R, T>(&mut self, field: &str, condition: R) -> Option<T>
-    where
-        for<'de> T: Serialize + Deserialize<'de>,
-        R: RangeArgument<U>;
-
-    fn remove_all_conditional<'a, R, T>(&'a mut self, field: &str, condition: R) -> Vec<T>
-    where
-        for<'de> T: Deserialize<'de> + 'static,
-        R: RangeArgument<U>;
-}
+use self::helpers::{deflatten, flatten, get_all_prims_from_map, get_primitive_conditional,
+                    get_primitive_from_map, remove_all_prims_conditional, remove_object,
+                    remove_primitive_conditional, remove_primitive_from_map, remove_value_arc};
 
 pub enum TreeSpaceEntry {
     IntLeaf(BTreeMap<i64, Vec<Arc<Value>>>),
@@ -320,279 +300,19 @@ impl TreeSpaceEntry {
     }
 }
 
-impl ConditionalEntry<i64> for TreeSpaceEntry {
-    fn get_conditional<R, T>(&self, field: &str, condition: R) -> Option<T>
-    where
-        for<'de> T: Serialize + Deserialize<'de>,
-        R: RangeArgument<i64>,
-    {
-        match self.get_int_conditional_helper(field, condition) {
-            Some(arc) => {
-                let val: &Value = arc.borrow();
-                from_value(deflatten(val.clone())).ok()
-            }
-            None => None,
-        }
-    }
-
-    fn get_all_conditional<'a, R, T>(
-        &'a self,
-        field: &str,
-        condition: R,
-    ) -> Box<Iterator<Item = T> + 'a>
-    where
-        for<'de> T: Deserialize<'de> + 'static,
-        R: RangeArgument<i64>,
-    {
-        match *self {
-            TreeSpaceEntry::Null => Box::new(empty()),
-            TreeSpaceEntry::IntLeaf(ref int_map) => get_all_prims_conditional(int_map, condition),
-            TreeSpaceEntry::Branch(ref field_map) => match field_map.get(field) {
-                Some(entry) => entry.get_all_conditional("", condition),
-                None => panic!("No such field found!"),
-            },
-            _ => panic!("Not an int type or a struct holding an int"),
-        }
-    }
-
-    fn remove_conditional<R, T>(&mut self, field: &str, condition: R) -> Option<T>
-    where
-        for<'de> T: Serialize + Deserialize<'de>,
-        R: RangeArgument<i64>,
-    {
-        match self.remove_int_conditional(field, condition) {
-            Some(arc) => match Arc::try_unwrap(arc) {
-                Ok(value) => from_value(deflatten(value)).ok(),
-                Err(_) => None,
-            },
-            None => None,
-        }
-    }
-
-    fn remove_all_conditional<'a, R, T>(&'a mut self, field: &str, condition: R) -> Vec<T>
-    where
-        for<'de> T: Deserialize<'de> + 'static,
-        R: RangeArgument<i64>,
-    {
-        self.remove_all_int_conditional(field, condition)
-            .into_iter()
-            .filter_map(|arc| match Arc::try_unwrap(arc) {
-                Ok(value) => from_value(deflatten(value)).ok(),
-                Err(_) => None,
-            })
-            .collect()
-    }
-}
-
-fn get_primitive_from_map<U>(map: &BTreeMap<U, Vec<Arc<Value>>>) -> Option<Arc<Value>> {
-    let mut iter = map.iter();
-    while let Some((_, vec)) = iter.next() {
-        if let Some(result) = vec.get(0) {
-            return Some(result.clone());
-        }
-    }
-    None
-}
-
-fn get_primitive_conditional<R, U>(
-    map: &BTreeMap<U, Vec<Arc<Value>>>,
-    condition: R,
-) -> Option<Arc<Value>>
-where
-    R: RangeArgument<U>,
-    U: Ord,
-{
-    let mut iter = map.range(condition);
-    while let Some((_, vec)) = iter.next() {
-        if let Some(result) = vec.get(0) {
-            return Some(result.clone());
-        }
-    }
-    None
-}
-
-fn get_all_prims_from_map<'a, T, U>(
-    map: &'a BTreeMap<U, Vec<Arc<Value>>>,
-) -> Box<Iterator<Item = T> + 'a>
-where
-    for<'de> T: Deserialize<'de> + 'static,
-{
-    let iter = map.iter().flat_map(|(_, vec)| {
-        vec.iter().filter_map(|item| {
-            let val: &Value = item.borrow();
-            from_value(deflatten(val.clone())).ok()
-        })
-    });
-    Box::new(iter)
-}
-
-fn get_all_prims_conditional<'a, T, R, U>(
-    map: &'a BTreeMap<U, Vec<Arc<Value>>>,
-    condition: R,
-) -> Box<Iterator<Item = T> + 'a>
-where
-    for<'de> T: Deserialize<'de> + 'static,
-    R: RangeArgument<U>,
-    U: Ord,
-{
-    let iter = map.range(condition).flat_map(|(_, vec)| {
-        vec.iter().filter_map(|item| {
-            let val: &Value = item.borrow();
-            from_value(deflatten(val.clone())).ok()
-        })
-    });
-    Box::new(iter)
-}
-
-fn remove_primitive_conditional<R, U>(
-    map: &mut BTreeMap<U, Vec<Arc<Value>>>,
-    condition: R,
-) -> Option<Arc<Value>>
-where
-    R: RangeArgument<U>,
-    U: Ord,
-{
-    let mut iter = map.range_mut(condition);
-    while let Some((_, vec)) = iter.next() {
-        if let Some(result) = vec.pop() {
-            return Some(result.clone());
-        }
-    }
-    None
-}
-
-fn remove_all_prims_conditional<'a, R, U>(
-    map: &'a mut BTreeMap<U, Vec<Arc<Value>>>,
-    condition: R,
-) -> Vec<Arc<Value>>
-where
-    R: RangeArgument<U>,
-    U: Ord,
-{
-    map.range_mut(condition)
-        .flat_map(|(_, vec)| vec.drain(..))
-        .collect()
-}
-
-fn remove_primitive_from_map<U>(map: &mut BTreeMap<U, Vec<Arc<Value>>>) -> Option<Arc<Value>> {
-    let mut iter = map.iter_mut();
-    while let Some((_, vec)) = iter.next() {
-        if let Some(val) = vec.pop() {
-            return Some(val);
-        }
-    }
-    None
-}
-
-fn remove_object(field_map: &mut HashMap<String, TreeSpaceEntry>) -> Option<Arc<Value>> {
-    let result_arc = match field_map.iter().next() {
-        Some((_, value)) => value.get_helper(),
-        None => None,
-    };
-
-    result_arc.map(|arc| {
-        remove_value_arc(field_map, &arc);
-        return arc;
-    })
-}
-
-fn remove_value_arc(field_map: &mut HashMap<String, TreeSpaceEntry>, removed_arc: &Arc<Value>) {
-    for (k, field) in field_map.iter_mut() {
-        let component = (*removed_arc).get(k).unwrap();
-        match *field {
-            TreeSpaceEntry::BoolLeaf(ref mut lookup_map) => {
-                match lookup_map.get_mut(&component.as_bool().unwrap()) {
-                    Some(vec) => vec.retain(|arc| !Arc::ptr_eq(arc, &removed_arc)),
-                    None => (),
-                }
-            }
-            TreeSpaceEntry::IntLeaf(ref mut lookup_map) => {
-                match lookup_map.get_mut(&component.as_i64().unwrap()) {
-                    Some(vec) => vec.retain(|arc| !Arc::ptr_eq(arc, &removed_arc)),
-                    None => (),
-                }
-            }
-            TreeSpaceEntry::StringLeaf(ref mut lookup_map) => {
-                match lookup_map.get_mut(component.as_str().unwrap()) {
-                    Some(vec) => vec.retain(|arc| !Arc::ptr_eq(arc, &removed_arc)),
-                    None => (),
-                }
-            }
-            TreeSpaceEntry::VecLeaf(ref mut vec) => {
-                vec.retain(|arc| !Arc::ptr_eq(arc, &removed_arc))
-            }
-            _ => (),
-        }
-    }
-}
-
-fn flatten(v: Value) -> Value {
-    match v {
-        Value::Object(map) => Value::Object(flatten_value_map(map)),
-        _ => v,
-    }
-}
-
-fn deflatten(v: Value) -> Value {
-    match v {
-        Value::Object(map) => Value::Object(deflatten_value_map(map)),
-        _ => v,
-    }
-}
-
-fn flatten_value_map(map: Map<String, Value>) -> Map<String, Value> {
-    let mut result = Map::new();
-    for (key, value) in map.into_iter() {
-        match value {
-            Value::Object(obj) => for (k, v) in obj.into_iter() {
-                let new_key = format!("{}.{}", key, k);
-                result.insert(new_key, flatten(v));
-            },
-            _ => {
-                result.insert(key, value);
-                ()
-            }
-        };
-    }
-    result
-}
-
-fn deflatten_value_map(map: Map<String, Value>) -> Map<String, Value> {
-    let mut temp = Map::new();
-    let mut result = Map::new();
-    for (key, value) in map.into_iter() {
-        let mut iterator = key.splitn(2, ".");
-        if let Some(newkey) = iterator.next() {
-            match iterator.next() {
-                None => {
-                    result.entry(newkey).or_insert(value);
-                    ()
-                }
-                Some(subkey) => {
-                    let submap = temp.entry(newkey).or_insert(Value::Object(Map::new()));
-                    if let Some(submap) = submap.as_object_mut() {
-                        submap.entry(subkey).or_insert(value);
-                    }
-                }
-            }
-        }
-    }
-
-    for (key, value) in temp.into_iter() {
-        result.insert(key, deflatten(value));
-    }
-    result
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    #[macro_use]
     #[derive(Serialize, Deserialize, PartialEq, Eq, Debug)]
     struct TestStruct {
         count: i32,
         name: String,
+    }
+
+    #[derive(Serialize, Deserialize, PartialEq, Eq, Debug)]
+    struct CompoundStruct {
+        person: TestStruct,
     }
 
     #[test]
@@ -618,6 +338,24 @@ mod tests {
                 name: String::from("Tuan"),
             })
         );
+
+        let mut compound_struct_entry = TreeSpaceEntry::new();
+        compound_struct_entry.add(CompoundStruct {
+            person: TestStruct {
+                count: 3,
+                name: String::from("Tuan"),
+            },
+        });
+        assert_eq!(
+            compound_struct_entry.get::<CompoundStruct>(),
+            Some(CompoundStruct {
+                person: TestStruct {
+                    count: 3,
+                    name: String::from("Tuan"),
+                },
+            })
+        );
+        assert!(compound_struct_entry.get::<CompoundStruct>().is_some());
     }
 
     #[test]
@@ -641,6 +379,24 @@ mod tests {
             })
         );
         assert_eq!(test_struct_entry.remove::<TestStruct>(), None);
+
+        let mut compound_struct_entry = TreeSpaceEntry::new();
+        compound_struct_entry.add(CompoundStruct {
+            person: TestStruct {
+                count: 3,
+                name: String::from("Tuan"),
+            },
+        });
+        assert_eq!(
+            compound_struct_entry.remove::<CompoundStruct>(),
+            Some(CompoundStruct {
+                person: TestStruct {
+                    count: 3,
+                    name: String::from("Tuan"),
+                },
+            })
+        );
+        assert!(compound_struct_entry.remove::<CompoundStruct>().is_none());
     }
 
     #[test]
@@ -654,6 +410,19 @@ mod tests {
             vec!["Hello", "World"]
         );
         assert_ne!(entry.get_all::<String>().count(), 0);
+
+        let mut test_struct_entry = TreeSpaceEntry::new();
+        test_struct_entry.add(TestStruct {
+            count: 3,
+            name: String::from("Tuan"),
+        });
+        test_struct_entry.add(TestStruct {
+            count: 5,
+            name: String::from("Duane"),
+        });
+
+        assert_eq!(test_struct_entry.get_all::<TestStruct>().count(), 2);
+        assert_eq!(test_struct_entry.get_all::<TestStruct>().count(), 2);
     }
 
     #[test]
@@ -664,5 +433,18 @@ mod tests {
         entry.add("World".to_string());
         assert_eq!(entry.remove_all::<String>(), vec!["Hello", "World"]);
         assert_eq!(entry.remove_all::<String>().len(), 0);
+
+        let mut test_struct_entry = TreeSpaceEntry::new();
+        test_struct_entry.add(TestStruct {
+            count: 3,
+            name: String::from("Tuan"),
+        });
+        test_struct_entry.add(TestStruct {
+            count: 5,
+            name: String::from("Duane"),
+        });
+
+        assert_eq!(test_struct_entry.remove_all::<TestStruct>().len(), 2);
+        assert_eq!(test_struct_entry.remove_all::<TestStruct>().len(), 0);
     }
 }
