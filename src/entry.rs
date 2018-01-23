@@ -1,16 +1,42 @@
-use std::any::Any;
-use std::clone::Clone;
 use std::iter::empty;
-use std::collections::BTreeMap;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 use std::borrow::Borrow;
+use std::cmp::Ord;
+use std::iter::IntoIterator;
 
 use serde_json::value::{from_value, to_value, Value};
 use serde_json::map::Map;
 use serde_json::Number;
 use serde::ser::Serialize;
 use serde::de::Deserialize;
+use std::collections::range::RangeArgument;
+
+trait ConditionalEntry<U> {
+    fn get_conditional<R, T>(&self, field: &str, condition: R) -> Option<T>
+    where
+        for<'de> T: Serialize + Deserialize<'de>,
+        R: RangeArgument<U>;
+
+    fn get_all_conditional<'a, R, T>(
+        &'a self,
+        field: &str,
+        condition: R,
+    ) -> Box<Iterator<Item = T> + 'a>
+    where
+        for<'de> T: Deserialize<'de> + 'static,
+        R: RangeArgument<U>;
+
+    fn remove_conditional<R, T>(&mut self, field: &str, condition: R) -> Option<T>
+    where
+        for<'de> T: Serialize + Deserialize<'de>,
+        R: RangeArgument<U>;
+
+    fn remove_all_conditional<'a, R, T>(&'a mut self, field: &str, condition: R) -> Vec<T>
+    where
+        for<'de> T: Deserialize<'de> + 'static,
+        R: RangeArgument<U>;
+}
 
 pub enum TreeSpaceEntry {
     IntLeaf(BTreeMap<i64, Vec<Arc<Value>>>),
@@ -22,14 +48,6 @@ pub enum TreeSpaceEntry {
 }
 
 impl TreeSpaceEntry {
-    pub fn as_any_ref(&self) -> &Any {
-        self
-    }
-
-    pub fn as_any_mut(&mut self) -> &mut Any {
-        self
-    }
-
     pub fn new() -> Self {
         TreeSpaceEntry::Null
     }
@@ -62,24 +80,12 @@ impl TreeSpaceEntry {
     where
         for<'de> T: Deserialize<'de>,
     {
-        match *self {
-            TreeSpaceEntry::Null => None,
-            TreeSpaceEntry::BoolLeaf(ref bool_map) => get_primitive_from_map(bool_map),
-            TreeSpaceEntry::IntLeaf(ref int_map) => get_primitive_from_map(int_map),
-            TreeSpaceEntry::StringLeaf(ref string_map) => get_primitive_from_map(string_map),
-            TreeSpaceEntry::VecLeaf(ref vec) => {
-                if let Some(result) = vec.get(0) {
-                    let val: &Value = result.borrow();
-                    return from_value(deflatten(val.clone())).ok();
-                }
-                None
+        match self.get_helper() {
+            Some(arc) => {
+                let val: &Value = arc.borrow();
+                from_value(deflatten(val.clone())).ok()
             }
-            TreeSpaceEntry::Branch(ref object_field_map) => {
-                if let Some((_, value)) = object_field_map.iter().next() {
-                    return value.get::<T>();
-                }
-                None
-            }
+            None => None,
         }
     }
 
@@ -134,6 +140,37 @@ impl TreeSpaceEntry {
         result
     }
 
+    fn get_helper(&self) -> Option<Arc<Value>> {
+        match *self {
+            TreeSpaceEntry::Null => None,
+            TreeSpaceEntry::BoolLeaf(ref bool_map) => get_primitive_from_map(bool_map),
+            TreeSpaceEntry::IntLeaf(ref int_map) => get_primitive_from_map(int_map),
+            TreeSpaceEntry::StringLeaf(ref string_map) => get_primitive_from_map(string_map),
+            TreeSpaceEntry::VecLeaf(ref vec) => vec.get(0).map(|res| res.clone()),
+            TreeSpaceEntry::Branch(ref object_field_map) => {
+                if let Some((_, value)) = object_field_map.iter().next() {
+                    return value.get_helper();
+                }
+                None
+            }
+        }
+    }
+
+    fn get_int_conditional_helper<R>(&self, field: &str, condition: R) -> Option<Arc<Value>>
+    where
+        R: RangeArgument<i64>,
+    {
+        match *self {
+            TreeSpaceEntry::Null => None,
+            TreeSpaceEntry::IntLeaf(ref int_map) => get_primitive_conditional(int_map, condition),
+            TreeSpaceEntry::Branch(ref field_map) => match field_map.get(field) {
+                Some(entry) => entry.get_int_conditional_helper("", condition),
+                None => panic!("No such field found!"),
+            },
+            _ => panic!("Not an int type or a struct holding an int"),
+        }
+    }
+
     fn remove_helper(&mut self) -> Option<Arc<Value>> {
         match *self {
             TreeSpaceEntry::Null => None,
@@ -142,6 +179,33 @@ impl TreeSpaceEntry {
             TreeSpaceEntry::StringLeaf(ref mut string_map) => remove_primitive_from_map(string_map),
             TreeSpaceEntry::VecLeaf(ref mut vec) => vec.pop(),
             TreeSpaceEntry::Branch(ref mut object_field_map) => remove_object(object_field_map),
+        }
+    }
+
+    fn remove_int_conditional<R>(&mut self, field: &str, condition: R) -> Option<Arc<Value>>
+    where
+        R: RangeArgument<i64>,
+    {
+        match *self {
+            TreeSpaceEntry::Null => None,
+            TreeSpaceEntry::IntLeaf(ref mut int_map) => {
+                get_primitive_conditional(int_map, condition)
+            }
+            TreeSpaceEntry::Branch(ref mut object_field_map) => {
+                let arc = match object_field_map.get_mut(field) {
+                    None => panic!("Field {} does not exist", field),
+                    Some(entry) => entry.remove_int_conditional(field, condition),
+                };
+
+                match arc {
+                    Some(arc) => {
+                        remove_value_arc(object_field_map, &arc);
+                        Some(arc)
+                    }
+                    None => None,
+                }
+            }
+            _ => panic!("Not an int type or a struct holding an int"),
         }
     }
 
@@ -232,15 +296,91 @@ impl TreeSpaceEntry {
     }
 }
 
-fn get_primitive_from_map<T, U>(map: &BTreeMap<U, Vec<Arc<Value>>>) -> Option<T>
-where
-    for<'de> T: Deserialize<'de>,
-{
+impl ConditionalEntry<i64> for TreeSpaceEntry {
+    fn get_conditional<R, T>(&self, field: &str, condition: R) -> Option<T>
+    where
+        for<'de> T: Serialize + Deserialize<'de>,
+        R: RangeArgument<i64>,
+    {
+        match self.get_int_conditional_helper(field, condition) {
+            Some(arc) => {
+                let val: &Value = arc.borrow();
+                from_value(deflatten(val.clone())).ok()
+            }
+            None => None,
+        }
+    }
+
+    fn get_all_conditional<'a, R, T>(
+        &'a self,
+        field: &str,
+        condition: R,
+    ) -> Box<Iterator<Item = T> + 'a>
+    where
+        for<'de> T: Deserialize<'de> + 'static,
+        R: RangeArgument<i64>,
+    {
+        match *self {
+            TreeSpaceEntry::Null => Box::new(empty()),
+            TreeSpaceEntry::IntLeaf(ref int_map) => get_all_prims_conditional(int_map, condition),
+            TreeSpaceEntry::Branch(ref field_map) => match field_map.get(field) {
+                Some(entry) => entry.get_all_conditional("", condition),
+                None => panic!("No such field found!"),
+            },
+            _ => panic!("Not an int type or a struct holding an int"),
+        }
+    }
+
+    fn remove_conditional<R, T>(&mut self, field: &str, condition: R) -> Option<T>
+    where
+        for<'de> T: Serialize + Deserialize<'de>,
+        R: RangeArgument<i64>,
+    {
+        match self.remove_int_conditional(field, condition) {
+            Some(arc) => match Arc::try_unwrap(arc) {
+                Ok(value) => from_value(deflatten(value)).ok(),
+                Err(_) => None,
+            },
+            None => None,
+        }
+    }
+
+    fn remove_all_conditional<'a, R, T>(&'a mut self, field: &str, condition: R) -> Vec<T>
+    where
+        for<'de> T: Deserialize<'de> + 'static,
+        R: RangeArgument<i64>,
+    {
+        match *self {
+            TreeSpaceEntry::Null => Vec::new(),
+            TreeSpaceEntry::IntLeaf(ref int_map) => Vec::new(),
+            TreeSpaceEntry::Branch(ref field_map) => Vec::new(),
+            _ => panic!("Not an int type or a struct holding an int"),
+        }
+    }
+}
+
+fn get_primitive_from_map<U>(map: &BTreeMap<U, Vec<Arc<Value>>>) -> Option<Arc<Value>> {
     let mut iter = map.iter();
     while let Some((_, vec)) = iter.next() {
         if let Some(result) = vec.get(0) {
-            let val: &Value = result.borrow();
-            return from_value(deflatten(val.clone())).ok();
+            return Some(result.clone());
+        }
+    }
+    None
+}
+
+fn get_primitive_conditional<R, U>(
+    map: &BTreeMap<U, Vec<Arc<Value>>>,
+    condition: R,
+) -> Option<Arc<Value>>
+where
+    R: RangeArgument<U>,
+    U: Ord,
+{
+    let mut iter = map.range(condition);
+    while let Some((_, vec)) = iter.next() {
+        if let Some(result) = vec.get(0) {
+            return Some(result.clone());
         }
     }
     None
@@ -261,10 +401,53 @@ where
     Box::new(iter)
 }
 
+fn get_all_prims_conditional<'a, T, R, U>(
+    map: &'a BTreeMap<U, Vec<Arc<Value>>>,
+    condition: R,
+) -> Box<Iterator<Item = T> + 'a>
+where
+    for<'de> T: Deserialize<'de> + 'static,
+    R: RangeArgument<U>,
+    U: Ord,
+{
+    let iter = map.range(condition).flat_map(|(_, vec)| {
+        vec.iter().filter_map(|item| {
+            let val: &Value = item.borrow();
+            from_value(deflatten(val.clone())).ok()
+        })
+    });
+    Box::new(iter)
+}
+
+fn remove_all_prims_conditional<'a, R, U>(
+    map: &'a mut BTreeMap<U, Vec<Arc<Value>>>,
+    condition: R,
+) -> Vec<Arc<Value>>
+where
+    R: RangeArgument<U>,
+    U: Ord,
+{
+    // let keys: Vec<&U>;
+    // let result;
+    // {
+    //     let (temp_keys, temp_values): (Vec<_>, Vec<_>) = map.range(condition).unzip();
+    //     keys = temp_keys.iter().map(|key| (*key).clone()).collect();
+    //     result = temp_values
+    //         .iter()
+    //         .flat_map(|vec| vec.iter().map(|item| item.clone()))
+    //         .collect();
+    // }
+    // // let (keys, values): (Vec<_>, Vec<_>) = map.range(condition).unzip();
+    // for key in keys {
+    //     let clone = key.clone();
+    //     map.remove(clone);
+    // }
+    // result
+}
+
 fn remove_primitive_from_map<U>(map: &mut BTreeMap<U, Vec<Arc<Value>>>) -> Option<Arc<Value>> {
     let mut iter = map.iter_mut();
     while let Some((_, vec)) = iter.next() {
-        println!("hello");
         if let Some(val) = vec.pop() {
             return Some(val);
         }
@@ -273,40 +456,45 @@ fn remove_primitive_from_map<U>(map: &mut BTreeMap<U, Vec<Arc<Value>>>) -> Optio
 }
 
 fn remove_object(field_map: &mut HashMap<String, TreeSpaceEntry>) -> Option<Arc<Value>> {
-    let mut iter = field_map.iter_mut();
-    if let Some((_, value)) = iter.next() {
-        if let Some(result_arc) = value.remove_helper() {
-            for (k, field) in iter {
-                let component = (*result_arc).get(k).unwrap();
-                match *field {
-                    TreeSpaceEntry::BoolLeaf(ref mut lookup_map) => {
-                        match lookup_map.get_mut(&component.as_bool().unwrap()) {
-                            Some(vec) => vec.retain(|arc| !Arc::ptr_eq(arc, &result_arc)),
-                            None => (),
-                        }
-                    }
-                    TreeSpaceEntry::IntLeaf(ref mut lookup_map) => {
-                        match lookup_map.get_mut(&component.as_i64().unwrap()) {
-                            Some(vec) => vec.retain(|arc| !Arc::ptr_eq(arc, &result_arc)),
-                            None => (),
-                        }
-                    }
-                    TreeSpaceEntry::StringLeaf(ref mut lookup_map) => {
-                        match lookup_map.get_mut(component.as_str().unwrap()) {
-                            Some(vec) => vec.retain(|arc| !Arc::ptr_eq(arc, &result_arc)),
-                            None => (),
-                        }
-                    }
-                    TreeSpaceEntry::VecLeaf(ref mut vec) => {
-                        vec.retain(|arc| !Arc::ptr_eq(arc, &result_arc))
-                    }
-                    _ => (),
+    let result_arc = match field_map.iter().next() {
+        Some((_, value)) => value.get_helper(),
+        None => None,
+    };
+
+    result_arc.map(|arc| {
+        remove_value_arc(field_map, &arc);
+        return arc;
+    })
+}
+
+fn remove_value_arc(field_map: &mut HashMap<String, TreeSpaceEntry>, removed_arc: &Arc<Value>) {
+    for (k, field) in field_map.iter_mut() {
+        let component = (*removed_arc).get(k).unwrap();
+        match *field {
+            TreeSpaceEntry::BoolLeaf(ref mut lookup_map) => {
+                match lookup_map.get_mut(&component.as_bool().unwrap()) {
+                    Some(vec) => vec.retain(|arc| !Arc::ptr_eq(arc, &removed_arc)),
+                    None => (),
                 }
             }
-            return Some(result_arc);
+            TreeSpaceEntry::IntLeaf(ref mut lookup_map) => {
+                match lookup_map.get_mut(&component.as_i64().unwrap()) {
+                    Some(vec) => vec.retain(|arc| !Arc::ptr_eq(arc, &removed_arc)),
+                    None => (),
+                }
+            }
+            TreeSpaceEntry::StringLeaf(ref mut lookup_map) => {
+                match lookup_map.get_mut(component.as_str().unwrap()) {
+                    Some(vec) => vec.retain(|arc| !Arc::ptr_eq(arc, &removed_arc)),
+                    None => (),
+                }
+            }
+            TreeSpaceEntry::VecLeaf(ref mut vec) => {
+                vec.retain(|arc| !Arc::ptr_eq(arc, &removed_arc))
+            }
+            _ => (),
         }
     }
-    None
 }
 
 fn flatten(v: Value) -> Value {

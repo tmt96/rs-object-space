@@ -1,6 +1,4 @@
-#![feature(drain_filter)]
-#![feature(specialization)]
-#![feature(unsize)]
+#![feature(collections_range)]
 extern crate num_traits;
 extern crate serde;
 #[macro_use]
