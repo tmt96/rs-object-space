@@ -151,6 +151,40 @@ impl TreeSpaceEntry {
         }
     }
 
+    fn get_string_conditional_helper<R>(&self, field: &str, condition: R) -> Option<Arc<Value>>
+    where
+        R: RangeArgument<String>,
+    {
+        match *self {
+            TreeSpaceEntry::Null => None,
+            TreeSpaceEntry::StringLeaf(ref string_map) => {
+                get_primitive_conditional(string_map, condition)
+            }
+            TreeSpaceEntry::Branch(ref field_map) => match field_map.get(field) {
+                Some(entry) => entry.get_string_conditional_helper("", condition),
+                None => panic!("No such field found!"),
+            },
+            _ => panic!("Not an string type or a struct holding an string"),
+        }
+    }
+
+    fn get_bool_conditional_helper<R>(&self, field: &str, condition: R) -> Option<Arc<Value>>
+    where
+        R: RangeArgument<bool>,
+    {
+        match *self {
+            TreeSpaceEntry::Null => None,
+            TreeSpaceEntry::BoolLeaf(ref bool_map) => {
+                get_primitive_conditional(bool_map, condition)
+            }
+            TreeSpaceEntry::Branch(ref field_map) => match field_map.get(field) {
+                Some(entry) => entry.get_bool_conditional_helper("", condition),
+                None => panic!("No such field found!"),
+            },
+            _ => panic!("Not an bool type or a struct holding an bool"),
+        }
+    }
+
     fn remove_helper(&mut self) -> Option<Arc<Value>> {
         match *self {
             TreeSpaceEntry::Null => None,
@@ -189,6 +223,60 @@ impl TreeSpaceEntry {
         }
     }
 
+    fn remove_string_conditional<R>(&mut self, field: &str, condition: R) -> Option<Arc<Value>>
+    where
+        R: RangeArgument<String>,
+    {
+        match *self {
+            TreeSpaceEntry::Null => None,
+            TreeSpaceEntry::StringLeaf(ref mut string_map) => {
+                remove_primitive_conditional(string_map, condition)
+            }
+            TreeSpaceEntry::Branch(ref mut object_field_map) => {
+                let arc = match object_field_map.get_mut(field) {
+                    None => panic!("Field {} does not exist", field),
+                    Some(entry) => entry.remove_string_conditional(field, condition),
+                };
+
+                match arc {
+                    Some(arc) => {
+                        remove_value_arc(object_field_map, &arc);
+                        Some(arc)
+                    }
+                    None => None,
+                }
+            }
+            _ => panic!("Not an string type or a struct holding an string"),
+        }
+    }
+
+    fn remove_bool_conditional<R>(&mut self, field: &str, condition: R) -> Option<Arc<Value>>
+    where
+        R: RangeArgument<bool>,
+    {
+        match *self {
+            TreeSpaceEntry::Null => None,
+            TreeSpaceEntry::BoolLeaf(ref mut bool_map) => {
+                remove_primitive_conditional(bool_map, condition)
+            }
+            TreeSpaceEntry::Branch(ref mut object_field_map) => {
+                let arc = match object_field_map.get_mut(field) {
+                    None => panic!("Field {} does not exist", field),
+                    Some(entry) => entry.remove_bool_conditional(field, condition),
+                };
+
+                match arc {
+                    Some(arc) => {
+                        remove_value_arc(object_field_map, &arc);
+                        Some(arc)
+                    }
+                    None => None,
+                }
+            }
+            _ => panic!("Not an int type or a struct holding an bool"),
+        }
+    }
+
     fn remove_all_int_conditional<R>(&mut self, field: &str, condition: R) -> Vec<Arc<Value>>
     where
         R: RangeArgument<i64>,
@@ -210,6 +298,54 @@ impl TreeSpaceEntry {
                 arc_list
             }
             _ => panic!("Not an int type or a struct holding an int"),
+        }
+    }
+
+    fn remove_all_string_conditional<R>(&mut self, field: &str, condition: R) -> Vec<Arc<Value>>
+    where
+        R: RangeArgument<String>,
+    {
+        match *self {
+            TreeSpaceEntry::Null => Vec::new(),
+            TreeSpaceEntry::StringLeaf(ref mut string_map) => {
+                remove_all_prims_conditional(string_map, condition)
+            }
+            TreeSpaceEntry::Branch(ref mut field_map) => {
+                let arc_list = match field_map.get_mut(field) {
+                    None => panic!("Field {} does not exist", field),
+                    Some(entry) => entry.remove_all_string_conditional(field, condition),
+                };
+
+                for arc in arc_list.iter() {
+                    remove_value_arc(field_map, arc);
+                }
+                arc_list
+            }
+            _ => panic!("Not an string type or a struct holding an string"),
+        }
+    }
+
+    fn remove_all_bool_conditional<R>(&mut self, field: &str, condition: R) -> Vec<Arc<Value>>
+    where
+        R: RangeArgument<bool>,
+    {
+        match *self {
+            TreeSpaceEntry::Null => Vec::new(),
+            TreeSpaceEntry::BoolLeaf(ref mut bool_map) => {
+                remove_all_prims_conditional(bool_map, condition)
+            }
+            TreeSpaceEntry::Branch(ref mut field_map) => {
+                let arc_list = match field_map.get_mut(field) {
+                    None => panic!("Field {} does not exist", field),
+                    Some(entry) => entry.remove_all_bool_conditional(field, condition),
+                };
+
+                for arc in arc_list.iter() {
+                    remove_value_arc(field_map, arc);
+                }
+                arc_list
+            }
+            _ => panic!("Not an bool type or a struct holding an bool"),
         }
     }
 
