@@ -17,6 +17,7 @@ mod helpers;
 use self::helpers::{deflatten, flatten, get_all_prims_from_map, get_primitive_conditional,
                     get_primitive_from_map, remove_all_prims_conditional, remove_object,
                     remove_primitive_conditional, remove_primitive_from_map, remove_value_arc};
+pub use entry::conditional_entry::ConditionalEntry;
 
 pub enum TreeSpaceEntry {
     IntLeaf(BTreeMap<i64, Vec<Arc<Value>>>),
