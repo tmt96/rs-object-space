@@ -424,3 +424,420 @@ impl ObjectSpaceConditional<bool> for TreeObjectSpace {
         }
     }
 }
+
+mod tests {
+    use super::*;
+
+    #[derive(Serialize, Deserialize, PartialEq, Eq, Debug)]
+    struct TestStruct {
+        count: i32,
+        name: String,
+    }
+
+    #[derive(Serialize, Deserialize, PartialEq, Eq, Debug)]
+    struct CompoundStruct {
+        person: TestStruct,
+    }
+
+    #[test]
+    fn try_read() {
+        let mut space = TreeObjectSpace::new();
+        assert_eq!(space.try_read::<String>(), None);
+        space.write(String::from("Hello World"));
+        space.write(TestStruct {
+            count: 3,
+            name: String::from("Tuan"),
+        });
+        space.write(CompoundStruct {
+            person: TestStruct {
+                count: 3,
+                name: String::from("Tuan"),
+            },
+        });
+
+        assert_eq!(
+            space.try_read::<String>(),
+            Some(String::from("Hello World"))
+        );
+        assert_ne!(space.try_read::<String>(), None);
+
+        assert_eq!(
+            space.try_read::<TestStruct>(),
+            Some(TestStruct {
+                count: 3,
+                name: String::from("Tuan"),
+            })
+        );
+
+        assert_eq!(
+            space.try_read::<CompoundStruct>(),
+            Some(CompoundStruct {
+                person: TestStruct {
+                    count: 3,
+                    name: String::from("Tuan"),
+                },
+            })
+        );
+        assert!(space.try_read::<CompoundStruct>().is_some());
+    }
+
+    #[test]
+    fn try_take() {
+        let mut space = TreeObjectSpace::new();
+        assert_eq!(space.try_take::<String>(), None);
+        space.write(String::from("Hello World"));
+        space.write(TestStruct {
+            count: 3,
+            name: String::from("Tuan"),
+        });
+        space.write(CompoundStruct {
+            person: TestStruct {
+                count: 3,
+                name: String::from("Tuan"),
+            },
+        });
+
+        assert_eq!(
+            space.try_take::<String>(),
+            Some(String::from("Hello World"))
+        );
+        assert_eq!(space.try_take::<String>(), None);
+
+        assert_eq!(
+            space.try_take::<TestStruct>(),
+            Some(TestStruct {
+                count: 3,
+                name: String::from("Tuan"),
+            })
+        );
+        assert_eq!(space.try_take::<TestStruct>(), None);
+
+        assert_eq!(
+            space.try_take::<CompoundStruct>(),
+            Some(CompoundStruct {
+                person: TestStruct {
+                    count: 3,
+                    name: String::from("Tuan"),
+                },
+            })
+        );
+        assert!(space.try_take::<CompoundStruct>().is_none());
+    }
+
+    #[test]
+    fn read_all() {
+        let mut space = TreeObjectSpace::new();
+        assert_eq!(space.read_all::<String>().count(), 0);
+        space.write("Hello".to_string());
+        space.write("World".to_string());
+        space.write(TestStruct {
+            count: 3,
+            name: String::from("Tuan"),
+        });
+        space.write(TestStruct {
+            count: 5,
+            name: String::from("Duane"),
+        });
+
+        assert_eq!(
+            space.read_all::<String>().collect::<Vec<String>>(),
+            vec!["Hello", "World"]
+        );
+        assert_ne!(space.read_all::<String>().count(), 0);
+
+        assert_eq!(space.read_all::<TestStruct>().count(), 2);
+        assert_eq!(space.read_all::<TestStruct>().count(), 2);
+    }
+
+    #[test]
+    fn take_all() {
+        let mut space = TreeObjectSpace::new();
+        assert_eq!(space.take_all::<String>().count(), 0);
+        space.write("Hello".to_string());
+        space.write("World".to_string());
+        space.write(TestStruct {
+            count: 3,
+            name: String::from("Tuan"),
+        });
+        space.write(TestStruct {
+            count: 5,
+            name: String::from("Duane"),
+        });
+
+        assert_eq!(space.take_all::<String>().count(), 2);
+        assert_eq!(space.take_all::<String>().count(), 0);
+
+        assert_eq!(space.take_all::<TestStruct>().count(), 2);
+        assert_eq!(space.take_all::<TestStruct>().count(), 0);
+    }
+
+    #[test]
+    fn try_read_conditional() {
+        let mut space = TreeObjectSpace::new();
+        assert_eq!(space.try_read_conditional::<i64, _>("", 2..4), None);
+        space.write::<i64>(3);
+        space.write::<i64>(5);
+
+        assert_eq!(space.try_read_conditional::<i64, _>("", 2..4), Some(3));
+        assert_ne!(space.try_read_conditional::<i64, _>("", 2..4), None);
+
+        space.write(TestStruct {
+            count: 3,
+            name: String::from("Tuan"),
+        });
+        space.write(TestStruct {
+            count: 5,
+            name: String::from("Duane"),
+        });
+
+        assert_eq!(
+            space.try_read_conditional::<TestStruct, _>("count", 2..4),
+            Some(TestStruct {
+                count: 3,
+                name: String::from("Tuan"),
+            })
+        );
+        assert!(
+            space
+                .try_read_conditional::<TestStruct, _>("count", 2..4)
+                .is_some()
+        );
+
+        space.write(CompoundStruct {
+            person: TestStruct {
+                count: 5,
+                name: String::from("Duane"),
+            },
+        });
+        space.write(CompoundStruct {
+            person: TestStruct {
+                count: 3,
+                name: String::from("Tuan"),
+            },
+        });
+
+        assert_eq!(
+            space.try_read_conditional::<CompoundStruct, _>("person.count", 2..4),
+            Some(CompoundStruct {
+                person: TestStruct {
+                    count: 3,
+                    name: String::from("Tuan"),
+                },
+            })
+        );
+        assert!(
+            space
+                .try_read_conditional::<CompoundStruct, _>("person.count", 2..4)
+                .is_some()
+        );
+    }
+
+    #[test]
+    fn try_take_conditional() {
+        let mut space = TreeObjectSpace::new();
+        assert_eq!(space.try_take_conditional::<i64, _>("", 2..4), None);
+        space.write::<i64>(3);
+        space.write::<i64>(5);
+        assert_eq!(space.try_take_conditional::<i64, _>("", 2..4), Some(3));
+        assert_eq!(space.try_take_conditional::<i64, _>("", 2..4), None);
+
+        space.write(TestStruct {
+            count: 3,
+            name: String::from("Tuan"),
+        });
+        space.write(TestStruct {
+            count: 5,
+            name: String::from("Duane"),
+        });
+
+        assert_eq!(
+            space.try_take_conditional::<TestStruct, _>("count", 2..4),
+            Some(TestStruct {
+                count: 3,
+                name: String::from("Tuan"),
+            })
+        );
+        assert!(
+            space
+                .try_take_conditional::<TestStruct, _>("count", 2..4)
+                .is_none()
+        );
+
+        space.write(CompoundStruct {
+            person: TestStruct {
+                count: 3,
+                name: String::from("Tuan"),
+            },
+        });
+        space.write(CompoundStruct {
+            person: TestStruct {
+                count: 5,
+                name: String::from("Duane"),
+            },
+        });
+
+        assert_eq!(
+            space.try_take_conditional::<CompoundStruct, _>("person.count", 2..4),
+            Some(CompoundStruct {
+                person: TestStruct {
+                    count: 3,
+                    name: String::from("Tuan"),
+                },
+            })
+        );
+        assert!(
+            space
+                .try_take_conditional::<CompoundStruct, _>("person.count", 2..4)
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn read_all_conditional() {
+        let mut space = TreeObjectSpace::new();
+        space.write::<i64>(3);
+        space.write::<i64>(5);
+        assert_eq!(space.read_all_conditional::<i64, _>("", 2..4).count(), 1);
+        assert_eq!(space.read_all_conditional::<i64, _>("", 2..4).count(), 1);
+
+        space.write(TestStruct {
+            count: 3,
+            name: String::from("Tuan"),
+        });
+        space.write(TestStruct {
+            count: 3,
+            name: String::from("Minh"),
+        });
+
+        space.write(TestStruct {
+            count: 5,
+            name: String::from("Duane"),
+        });
+
+        assert_eq!(
+            space
+                .read_all_conditional::<TestStruct, _>("count", 2..4)
+                .count(),
+            2
+        );
+        assert_eq!(
+            space
+                .read_all_conditional::<TestStruct, _>("count", 2..4)
+                .count(),
+            2
+        );
+
+        space.write(CompoundStruct {
+            person: TestStruct {
+                count: 5,
+                name: String::from("Duane"),
+            },
+        });
+        space.write(CompoundStruct {
+            person: TestStruct {
+                count: 3,
+                name: String::from("Tuan"),
+            },
+        });
+        space.write(CompoundStruct {
+            person: TestStruct {
+                count: 3,
+                name: String::from("Minh"),
+            },
+        });
+
+        assert_eq!(
+            space
+                .read_all_conditional::<CompoundStruct, _>("person.count", 2..4)
+                .count(),
+            2
+        );
+        assert_eq!(
+            space
+                .read_all_conditional::<CompoundStruct, _>("person.count", 2..4)
+                .count(),
+            2
+        );
+    }
+
+    #[test]
+    fn take_all_conditional() {
+        let mut space = TreeObjectSpace::new();
+        space.write::<i64>(3);
+        space.write::<i64>(5);
+        assert_eq!(space.take_all_conditional::<i64, _>("", 2..4).count(), 1);
+        assert_eq!(space.take_all_conditional::<i64, _>("", 2..4).count(), 0);
+
+        space.write(TestStruct {
+            count: 3,
+            name: String::from("Tuan"),
+        });
+        space.write(TestStruct {
+            count: 3,
+            name: String::from("Minh"),
+        });
+
+        space.write(TestStruct {
+            count: 5,
+            name: String::from("Duane"),
+        });
+
+        assert_eq!(
+            space
+                .take_all_conditional::<TestStruct, _>("count", 2..4)
+                .count(),
+            2
+        );
+        assert_eq!(
+            space
+                .take_all_conditional::<TestStruct, _>("count", 2..4)
+                .count(),
+            0
+        );
+        assert_eq!(
+            space
+                .take_all_conditional::<TestStruct, _>("count", 4..)
+                .count(),
+            1
+        );
+
+        space.write(CompoundStruct {
+            person: TestStruct {
+                count: 5,
+                name: String::from("Duane"),
+            },
+        });
+        space.write(CompoundStruct {
+            person: TestStruct {
+                count: 3,
+                name: String::from("Tuan"),
+            },
+        });
+        space.write(CompoundStruct {
+            person: TestStruct {
+                count: 3,
+                name: String::from("Minh"),
+            },
+        });
+
+        assert_eq!(
+            space
+                .take_all_conditional::<CompoundStruct, _>("person.count", 2..4)
+                .count(),
+            2
+        );
+        assert_eq!(
+            space
+                .take_all_conditional::<CompoundStruct, _>("person.count", 2..4)
+                .count(),
+            0
+        );
+        assert_eq!(
+            space
+                .take_all_conditional::<CompoundStruct, _>("person.count", 4..)
+                .count(),
+            1
+        );
+    }
+
+}
