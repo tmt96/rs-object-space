@@ -3,13 +3,13 @@ use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 use std::borrow::Borrow;
 use std::iter::IntoIterator;
+use std::collections::range::RangeArgument;
 
 use serde_json::value::{from_value, to_value, Value};
 use serde_json::map::Map;
 use serde_json::Number;
 use serde::ser::Serialize;
 use serde::de::Deserialize;
-use std::collections::range::RangeArgument;
 
 mod conditional_entry;
 mod helpers;
@@ -18,8 +18,10 @@ use self::helpers::{deflatten, flatten, get_all_prims_from_map, get_primitive_co
                     get_primitive_from_map, remove_all_prims_conditional, remove_object,
                     remove_primitive_conditional, remove_primitive_from_map, remove_value_arc};
 pub use entry::conditional_entry::ConditionalEntry;
+use not_nan::{FloatIsNaN, NotNaN};
 
 pub enum TreeSpaceEntry {
+    FloatLeaf(BTreeMap<NotNaN<f64>, Vec<Arc<Value>>>),
     IntLeaf(BTreeMap<i64, Vec<Arc<Value>>>),
     BoolLeaf(BTreeMap<bool, Vec<Arc<Value>>>),
     StringLeaf(BTreeMap<String, Vec<Arc<Value>>>),
@@ -78,6 +80,7 @@ impl TreeSpaceEntry {
             TreeSpaceEntry::Null => Box::new(empty()),
             TreeSpaceEntry::BoolLeaf(ref bool_map) => get_all_prims_from_map(bool_map),
             TreeSpaceEntry::IntLeaf(ref int_map) => get_all_prims_from_map(int_map),
+            TreeSpaceEntry::FloatLeaf(ref float_map) => get_all_prims_from_map(float_map),
             TreeSpaceEntry::StringLeaf(ref string_map) => get_all_prims_from_map(string_map),
             TreeSpaceEntry::VecLeaf(ref vec) => Box::new(vec.iter().filter_map(|item| {
                 let val: &Value = item.borrow();
@@ -113,6 +116,7 @@ impl TreeSpaceEntry {
         match *self {
             TreeSpaceEntry::BoolLeaf(ref mut bool_map) => *bool_map = BTreeMap::new(),
             TreeSpaceEntry::IntLeaf(ref mut int_map) => *int_map = BTreeMap::new(),
+            TreeSpaceEntry::FloatLeaf(ref mut float_map) => *float_map = BTreeMap::new(),
             TreeSpaceEntry::StringLeaf(ref mut string_map) => *string_map = BTreeMap::new(),
             TreeSpaceEntry::VecLeaf(ref mut vec) => *vec = Vec::new(),
             TreeSpaceEntry::Branch(ref mut object_field_map) => *object_field_map = HashMap::new(),
@@ -126,6 +130,7 @@ impl TreeSpaceEntry {
             TreeSpaceEntry::Null => None,
             TreeSpaceEntry::BoolLeaf(ref bool_map) => get_primitive_from_map(bool_map),
             TreeSpaceEntry::IntLeaf(ref int_map) => get_primitive_from_map(int_map),
+            TreeSpaceEntry::FloatLeaf(ref float_map) => get_primitive_from_map(float_map),
             TreeSpaceEntry::StringLeaf(ref string_map) => get_primitive_from_map(string_map),
             TreeSpaceEntry::VecLeaf(ref vec) => vec.get(0).map(|res| res.clone()),
             TreeSpaceEntry::Branch(ref object_field_map) => {
@@ -191,6 +196,7 @@ impl TreeSpaceEntry {
             TreeSpaceEntry::Null => None,
             TreeSpaceEntry::BoolLeaf(ref mut bool_map) => remove_primitive_from_map(bool_map),
             TreeSpaceEntry::IntLeaf(ref mut int_map) => remove_primitive_from_map(int_map),
+            TreeSpaceEntry::FloatLeaf(ref mut float_map) => remove_primitive_from_map(float_map),
             TreeSpaceEntry::StringLeaf(ref mut string_map) => remove_primitive_from_map(string_map),
             TreeSpaceEntry::VecLeaf(ref mut vec) => vec.pop(),
             TreeSpaceEntry::Branch(ref mut object_field_map) => remove_object(object_field_map),
@@ -374,7 +380,21 @@ impl TreeSpaceEntry {
         }
     }
 
-    fn add_value_by_float(&mut self, _f: f64, _value: Arc<Value>) {}
+    fn add_value_by_float(&mut self, f: f64, value: Arc<Value>) {
+        if let &mut TreeSpaceEntry::Null = self {
+            *self = TreeSpaceEntry::FloatLeaf(BTreeMap::new());
+        }
+
+        let key = NotNaN::new(f).expect("NaN is not allowed");
+
+        match *self {
+            TreeSpaceEntry::FloatLeaf(ref mut map) => {
+                let vec = map.entry(key).or_insert(Vec::new());
+                vec.push(value);
+            }
+            _ => panic!("Incorrect data type! Found float."),
+        }
+    }
 
     fn add_value_by_string(&mut self, string: String, value: Arc<Value>) {
         if let &mut TreeSpaceEntry::Null = self {
@@ -447,9 +467,10 @@ mod tests {
         name: String,
     }
 
-    #[derive(Serialize, Deserialize, PartialEq, Eq, Debug)]
+    #[derive(Serialize, Deserialize, PartialEq, Debug)]
     struct CompoundStruct {
         person: TestStruct,
+        gpa: f64,
     }
 
     #[test]
@@ -482,6 +503,7 @@ mod tests {
                 count: 3,
                 name: String::from("Tuan"),
             },
+            gpa: 3.0,
         });
         assert_eq!(
             compound_struct_entry.get::<CompoundStruct>(),
@@ -490,6 +512,7 @@ mod tests {
                     count: 3,
                     name: String::from("Tuan"),
                 },
+                gpa: 3.0,
             })
         );
         assert!(compound_struct_entry.get::<CompoundStruct>().is_some());
@@ -523,6 +546,7 @@ mod tests {
                 count: 3,
                 name: String::from("Tuan"),
             },
+            gpa: 3.0,
         });
         assert_eq!(
             compound_struct_entry.remove::<CompoundStruct>(),
@@ -531,6 +555,7 @@ mod tests {
                     count: 3,
                     name: String::from("Tuan"),
                 },
+                gpa: 3.0,
             })
         );
         assert!(compound_struct_entry.remove::<CompoundStruct>().is_none());

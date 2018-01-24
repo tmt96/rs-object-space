@@ -9,6 +9,7 @@ use serde_json::map::Map;
 use serde::de::Deserialize;
 use std::collections::range::RangeArgument;
 use entry::TreeSpaceEntry;
+use not_nan::NotNaN;
 
 pub fn get_primitive_from_map<U>(map: &BTreeMap<U, Vec<Arc<Value>>>) -> Option<Arc<Value>> {
     let mut iter = map.iter();
@@ -134,6 +135,12 @@ pub fn remove_value_arc(field_map: &mut HashMap<String, TreeSpaceEntry>, removed
             }
             TreeSpaceEntry::IntLeaf(ref mut lookup_map) => {
                 match lookup_map.get_mut(&component.as_i64().unwrap()) {
+                    Some(vec) => vec.retain(|arc| !Arc::ptr_eq(arc, &removed_arc)),
+                    None => (),
+                }
+            }
+            TreeSpaceEntry::FloatLeaf(ref mut lookup_map) => {
+                match lookup_map.get_mut(&NotNaN::from(component.as_f64().unwrap())) {
                     Some(vec) => vec.retain(|arc| !Arc::ptr_eq(arc, &removed_arc)),
                     None => (),
                 }
