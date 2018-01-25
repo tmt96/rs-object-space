@@ -21,7 +21,7 @@ pub fn get_primitive_from_map<U>(map: &BTreeMap<U, Vec<Arc<Value>>>) -> Option<A
     None
 }
 
-pub fn get_primitive_conditional<R, U>(
+pub fn get_primitive_range<R, U>(
     map: &BTreeMap<U, Vec<Arc<Value>>>,
     condition: R,
 ) -> Option<Arc<Value>>
@@ -53,7 +53,7 @@ where
     Box::new(iter)
 }
 
-pub fn get_all_prims_conditional<'a, T, R, U>(
+pub fn get_all_prims_range<'a, T, R, U>(
     map: &'a BTreeMap<U, Vec<Arc<Value>>>,
     condition: R,
 ) -> Box<Iterator<Item = T> + 'a>
@@ -71,7 +71,7 @@ where
     Box::new(iter)
 }
 
-pub fn remove_primitive_conditional<R, U>(
+pub fn remove_primitive_range<R, U>(
     map: &mut BTreeMap<U, Vec<Arc<Value>>>,
     condition: R,
 ) -> Option<Arc<Value>>
@@ -88,7 +88,7 @@ where
     None
 }
 
-pub fn remove_all_prims_conditional<'a, R, U>(
+pub fn remove_all_prims_range<'a, R, U>(
     map: &'a mut BTreeMap<U, Vec<Arc<Value>>>,
     condition: R,
 ) -> Vec<Arc<Value>>

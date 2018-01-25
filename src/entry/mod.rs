@@ -11,13 +11,13 @@ use serde_json::Number;
 use serde::ser::Serialize;
 use serde::de::Deserialize;
 
-mod conditional_entry;
+mod range_entry;
 mod helpers;
 
-use self::helpers::{deflatten, flatten, get_all_prims_from_map, get_primitive_conditional,
-                    get_primitive_from_map, remove_all_prims_conditional, remove_object,
-                    remove_primitive_conditional, remove_primitive_from_map, remove_value_arc};
-pub use entry::conditional_entry::ConditionalEntry;
+use self::helpers::{deflatten, flatten, get_all_prims_from_map, get_primitive_from_map,
+                    get_primitive_range, remove_all_prims_range, remove_object,
+                    remove_primitive_from_map, remove_primitive_range, remove_value_arc};
+pub use entry::range_entry::RangeEntry;
 pub use not_nan::{FloatIsNaN, NotNaN};
 
 pub enum TreeSpaceEntry {
@@ -142,66 +142,62 @@ impl TreeSpaceEntry {
         }
     }
 
-    fn get_int_conditional_helper<R>(&self, field: &str, condition: R) -> Option<Arc<Value>>
+    fn get_int_range_helper<R>(&self, field: &str, condition: R) -> Option<Arc<Value>>
     where
         R: RangeArgument<i64>,
     {
         match *self {
             TreeSpaceEntry::Null => None,
-            TreeSpaceEntry::IntLeaf(ref int_map) => get_primitive_conditional(int_map, condition),
+            TreeSpaceEntry::IntLeaf(ref int_map) => get_primitive_range(int_map, condition),
             TreeSpaceEntry::Branch(ref field_map) => match field_map.get(field) {
-                Some(entry) => entry.get_int_conditional_helper("", condition),
+                Some(entry) => entry.get_int_range_helper("", condition),
                 None => panic!("No such field found!"),
             },
             _ => panic!("Not an int type or a struct holding an int"),
         }
     }
 
-    fn get_float_conditional_helper<R>(&self, field: &str, condition: R) -> Option<Arc<Value>>
+    fn get_float_range_helper<R>(&self, field: &str, condition: R) -> Option<Arc<Value>>
     where
         R: RangeArgument<NotNaN<f64>>,
     {
         match *self {
             TreeSpaceEntry::Null => None,
-            TreeSpaceEntry::FloatLeaf(ref float_map) => {
-                get_primitive_conditional(float_map, condition)
-            }
+            TreeSpaceEntry::FloatLeaf(ref float_map) => get_primitive_range(float_map, condition),
             TreeSpaceEntry::Branch(ref field_map) => match field_map.get(field) {
-                Some(entry) => entry.get_float_conditional_helper("", condition),
+                Some(entry) => entry.get_float_range_helper("", condition),
                 None => panic!("No such field found!"),
             },
             _ => panic!("Not an float type or a struct holding an float"),
         }
     }
 
-    fn get_string_conditional_helper<R>(&self, field: &str, condition: R) -> Option<Arc<Value>>
+    fn get_string_range_helper<R>(&self, field: &str, condition: R) -> Option<Arc<Value>>
     where
         R: RangeArgument<String>,
     {
         match *self {
             TreeSpaceEntry::Null => None,
             TreeSpaceEntry::StringLeaf(ref string_map) => {
-                get_primitive_conditional(string_map, condition)
+                get_primitive_range(string_map, condition)
             }
             TreeSpaceEntry::Branch(ref field_map) => match field_map.get(field) {
-                Some(entry) => entry.get_string_conditional_helper("", condition),
+                Some(entry) => entry.get_string_range_helper("", condition),
                 None => panic!("No such field found!"),
             },
             _ => panic!("Not an string type or a struct holding an string"),
         }
     }
 
-    fn get_bool_conditional_helper<R>(&self, field: &str, condition: R) -> Option<Arc<Value>>
+    fn get_bool_range_helper<R>(&self, field: &str, condition: R) -> Option<Arc<Value>>
     where
         R: RangeArgument<bool>,
     {
         match *self {
             TreeSpaceEntry::Null => None,
-            TreeSpaceEntry::BoolLeaf(ref bool_map) => {
-                get_primitive_conditional(bool_map, condition)
-            }
+            TreeSpaceEntry::BoolLeaf(ref bool_map) => get_primitive_range(bool_map, condition),
             TreeSpaceEntry::Branch(ref field_map) => match field_map.get(field) {
-                Some(entry) => entry.get_bool_conditional_helper("", condition),
+                Some(entry) => entry.get_bool_range_helper("", condition),
                 None => panic!("No such field found!"),
             },
             _ => panic!("Not an bool type or a struct holding an bool"),
@@ -220,19 +216,17 @@ impl TreeSpaceEntry {
         }
     }
 
-    fn remove_int_conditional<R>(&mut self, field: &str, condition: R) -> Option<Arc<Value>>
+    fn remove_int_range<R>(&mut self, field: &str, condition: R) -> Option<Arc<Value>>
     where
         R: RangeArgument<i64>,
     {
         match *self {
             TreeSpaceEntry::Null => None,
-            TreeSpaceEntry::IntLeaf(ref mut int_map) => {
-                remove_primitive_conditional(int_map, condition)
-            }
+            TreeSpaceEntry::IntLeaf(ref mut int_map) => remove_primitive_range(int_map, condition),
             TreeSpaceEntry::Branch(ref mut object_field_map) => {
                 let arc = match object_field_map.get_mut(field) {
                     None => panic!("Field {} does not exist", field),
-                    Some(entry) => entry.remove_int_conditional(field, condition),
+                    Some(entry) => entry.remove_int_range(field, condition),
                 };
 
                 match arc {
@@ -247,19 +241,19 @@ impl TreeSpaceEntry {
         }
     }
 
-    fn remove_float_conditional<R>(&mut self, field: &str, condition: R) -> Option<Arc<Value>>
+    fn remove_float_range<R>(&mut self, field: &str, condition: R) -> Option<Arc<Value>>
     where
         R: RangeArgument<NotNaN<f64>>,
     {
         match *self {
             TreeSpaceEntry::Null => None,
             TreeSpaceEntry::FloatLeaf(ref mut float_map) => {
-                remove_primitive_conditional(float_map, condition)
+                remove_primitive_range(float_map, condition)
             }
             TreeSpaceEntry::Branch(ref mut object_field_map) => {
                 let arc = match object_field_map.get_mut(field) {
                     None => panic!("Field {} does not exist", field),
-                    Some(entry) => entry.remove_float_conditional(field, condition),
+                    Some(entry) => entry.remove_float_range(field, condition),
                 };
 
                 match arc {
@@ -274,19 +268,19 @@ impl TreeSpaceEntry {
         }
     }
 
-    fn remove_string_conditional<R>(&mut self, field: &str, condition: R) -> Option<Arc<Value>>
+    fn remove_string_range<R>(&mut self, field: &str, condition: R) -> Option<Arc<Value>>
     where
         R: RangeArgument<String>,
     {
         match *self {
             TreeSpaceEntry::Null => None,
             TreeSpaceEntry::StringLeaf(ref mut string_map) => {
-                remove_primitive_conditional(string_map, condition)
+                remove_primitive_range(string_map, condition)
             }
             TreeSpaceEntry::Branch(ref mut object_field_map) => {
                 let arc = match object_field_map.get_mut(field) {
                     None => panic!("Field {} does not exist", field),
-                    Some(entry) => entry.remove_string_conditional(field, condition),
+                    Some(entry) => entry.remove_string_range(field, condition),
                 };
 
                 match arc {
@@ -301,19 +295,19 @@ impl TreeSpaceEntry {
         }
     }
 
-    fn remove_bool_conditional<R>(&mut self, field: &str, condition: R) -> Option<Arc<Value>>
+    fn remove_bool_range<R>(&mut self, field: &str, condition: R) -> Option<Arc<Value>>
     where
         R: RangeArgument<bool>,
     {
         match *self {
             TreeSpaceEntry::Null => None,
             TreeSpaceEntry::BoolLeaf(ref mut bool_map) => {
-                remove_primitive_conditional(bool_map, condition)
+                remove_primitive_range(bool_map, condition)
             }
             TreeSpaceEntry::Branch(ref mut object_field_map) => {
                 let arc = match object_field_map.get_mut(field) {
                     None => panic!("Field {} does not exist", field),
-                    Some(entry) => entry.remove_bool_conditional(field, condition),
+                    Some(entry) => entry.remove_bool_range(field, condition),
                 };
 
                 match arc {
@@ -328,19 +322,17 @@ impl TreeSpaceEntry {
         }
     }
 
-    fn remove_all_int_conditional<R>(&mut self, field: &str, condition: R) -> Vec<Arc<Value>>
+    fn remove_all_int_range<R>(&mut self, field: &str, condition: R) -> Vec<Arc<Value>>
     where
         R: RangeArgument<i64>,
     {
         match *self {
             TreeSpaceEntry::Null => Vec::new(),
-            TreeSpaceEntry::IntLeaf(ref mut int_map) => {
-                remove_all_prims_conditional(int_map, condition)
-            }
+            TreeSpaceEntry::IntLeaf(ref mut int_map) => remove_all_prims_range(int_map, condition),
             TreeSpaceEntry::Branch(ref mut field_map) => {
                 let arc_list = match field_map.get_mut(field) {
                     None => panic!("Field {} does not exist", field),
-                    Some(entry) => entry.remove_all_int_conditional(field, condition),
+                    Some(entry) => entry.remove_all_int_range(field, condition),
                 };
 
                 for arc in arc_list.iter() {
@@ -352,19 +344,19 @@ impl TreeSpaceEntry {
         }
     }
 
-    fn remove_all_float_conditional<R>(&mut self, field: &str, condition: R) -> Vec<Arc<Value>>
+    fn remove_all_float_range<R>(&mut self, field: &str, condition: R) -> Vec<Arc<Value>>
     where
         R: RangeArgument<NotNaN<f64>>,
     {
         match *self {
             TreeSpaceEntry::Null => Vec::new(),
             TreeSpaceEntry::FloatLeaf(ref mut float_map) => {
-                remove_all_prims_conditional(float_map, condition)
+                remove_all_prims_range(float_map, condition)
             }
             TreeSpaceEntry::Branch(ref mut field_map) => {
                 let arc_list = match field_map.get_mut(field) {
                     None => panic!("Field {} does not exist", field),
-                    Some(entry) => entry.remove_all_float_conditional(field, condition),
+                    Some(entry) => entry.remove_all_float_range(field, condition),
                 };
 
                 for arc in arc_list.iter() {
@@ -376,19 +368,19 @@ impl TreeSpaceEntry {
         }
     }
 
-    fn remove_all_string_conditional<R>(&mut self, field: &str, condition: R) -> Vec<Arc<Value>>
+    fn remove_all_string_range<R>(&mut self, field: &str, condition: R) -> Vec<Arc<Value>>
     where
         R: RangeArgument<String>,
     {
         match *self {
             TreeSpaceEntry::Null => Vec::new(),
             TreeSpaceEntry::StringLeaf(ref mut string_map) => {
-                remove_all_prims_conditional(string_map, condition)
+                remove_all_prims_range(string_map, condition)
             }
             TreeSpaceEntry::Branch(ref mut field_map) => {
                 let arc_list = match field_map.get_mut(field) {
                     None => panic!("Field {} does not exist", field),
-                    Some(entry) => entry.remove_all_string_conditional(field, condition),
+                    Some(entry) => entry.remove_all_string_range(field, condition),
                 };
 
                 for arc in arc_list.iter() {
@@ -400,19 +392,19 @@ impl TreeSpaceEntry {
         }
     }
 
-    fn remove_all_bool_conditional<R>(&mut self, field: &str, condition: R) -> Vec<Arc<Value>>
+    fn remove_all_bool_range<R>(&mut self, field: &str, condition: R) -> Vec<Arc<Value>>
     where
         R: RangeArgument<bool>,
     {
         match *self {
             TreeSpaceEntry::Null => Vec::new(),
             TreeSpaceEntry::BoolLeaf(ref mut bool_map) => {
-                remove_all_prims_conditional(bool_map, condition)
+                remove_all_prims_range(bool_map, condition)
             }
             TreeSpaceEntry::Branch(ref mut field_map) => {
                 let arc_list = match field_map.get_mut(field) {
                     None => panic!("Field {} does not exist", field),
-                    Some(entry) => entry.remove_all_bool_conditional(field, condition),
+                    Some(entry) => entry.remove_all_bool_range(field, condition),
                 };
 
                 for arc in arc_list.iter() {
