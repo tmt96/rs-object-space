@@ -18,7 +18,7 @@ use self::helpers::{deflatten, flatten, get_all_prims_from_map, get_primitive_co
                     get_primitive_from_map, remove_all_prims_conditional, remove_object,
                     remove_primitive_conditional, remove_primitive_from_map, remove_value_arc};
 pub use entry::conditional_entry::ConditionalEntry;
-use not_nan::{FloatIsNaN, NotNaN};
+pub use not_nan::{FloatIsNaN, NotNaN};
 
 pub enum TreeSpaceEntry {
     FloatLeaf(BTreeMap<NotNaN<f64>, Vec<Arc<Value>>>),
@@ -157,6 +157,23 @@ impl TreeSpaceEntry {
         }
     }
 
+    fn get_float_conditional_helper<R>(&self, field: &str, condition: R) -> Option<Arc<Value>>
+    where
+        R: RangeArgument<NotNaN<f64>>,
+    {
+        match *self {
+            TreeSpaceEntry::Null => None,
+            TreeSpaceEntry::FloatLeaf(ref float_map) => {
+                get_primitive_conditional(float_map, condition)
+            }
+            TreeSpaceEntry::Branch(ref field_map) => match field_map.get(field) {
+                Some(entry) => entry.get_float_conditional_helper("", condition),
+                None => panic!("No such field found!"),
+            },
+            _ => panic!("Not an float type or a struct holding an float"),
+        }
+    }
+
     fn get_string_conditional_helper<R>(&self, field: &str, condition: R) -> Option<Arc<Value>>
     where
         R: RangeArgument<String>,
@@ -227,6 +244,33 @@ impl TreeSpaceEntry {
                 }
             }
             _ => panic!("Not an int type or a struct holding an int"),
+        }
+    }
+
+    fn remove_float_conditional<R>(&mut self, field: &str, condition: R) -> Option<Arc<Value>>
+    where
+        R: RangeArgument<NotNaN<f64>>,
+    {
+        match *self {
+            TreeSpaceEntry::Null => None,
+            TreeSpaceEntry::FloatLeaf(ref mut float_map) => {
+                remove_primitive_conditional(float_map, condition)
+            }
+            TreeSpaceEntry::Branch(ref mut object_field_map) => {
+                let arc = match object_field_map.get_mut(field) {
+                    None => panic!("Field {} does not exist", field),
+                    Some(entry) => entry.remove_float_conditional(field, condition),
+                };
+
+                match arc {
+                    Some(arc) => {
+                        remove_value_arc(object_field_map, &arc);
+                        Some(arc)
+                    }
+                    None => None,
+                }
+            }
+            _ => panic!("Not an float type or a struct holding an float"),
         }
     }
 
@@ -305,6 +349,30 @@ impl TreeSpaceEntry {
                 arc_list
             }
             _ => panic!("Not an int type or a struct holding an int"),
+        }
+    }
+
+    fn remove_all_float_conditional<R>(&mut self, field: &str, condition: R) -> Vec<Arc<Value>>
+    where
+        R: RangeArgument<NotNaN<f64>>,
+    {
+        match *self {
+            TreeSpaceEntry::Null => Vec::new(),
+            TreeSpaceEntry::FloatLeaf(ref mut float_map) => {
+                remove_all_prims_conditional(float_map, condition)
+            }
+            TreeSpaceEntry::Branch(ref mut field_map) => {
+                let arc_list = match field_map.get_mut(field) {
+                    None => panic!("Field {} does not exist", field),
+                    Some(entry) => entry.remove_all_float_conditional(field, condition),
+                };
+
+                for arc in arc_list.iter() {
+                    remove_value_arc(field_map, arc);
+                }
+                arc_list
+            }
+            _ => panic!("Not an float type or a struct holding an float"),
         }
     }
 

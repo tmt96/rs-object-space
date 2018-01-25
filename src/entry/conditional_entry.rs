@@ -10,6 +10,7 @@ use serde::de::Deserialize;
 
 use entry::helpers::{deflatten, get_all_prims_conditional};
 use entry::TreeSpaceEntry;
+use not_nan::NotNaN;
 
 pub trait ConditionalEntry<U> {
     fn get_conditional<T, R>(&self, field: &str, condition: R) -> Option<T>
@@ -233,6 +234,72 @@ impl ConditionalEntry<bool> for TreeSpaceEntry {
     }
 }
 
+impl ConditionalEntry<NotNaN<f64>> for TreeSpaceEntry {
+    fn get_conditional<T, R>(&self, field: &str, condition: R) -> Option<T>
+    where
+        for<'de> T: Serialize + Deserialize<'de>,
+        R: RangeArgument<NotNaN<f64>>,
+    {
+        match self.get_float_conditional_helper(field, condition) {
+            Some(arc) => {
+                let val: &Value = arc.borrow();
+                from_value(deflatten(val.clone())).ok()
+            }
+            None => None,
+        }
+    }
+
+    fn get_all_conditional<'a, T, R>(
+        &'a self,
+        field: &str,
+        condition: R,
+    ) -> Box<Iterator<Item = T> + 'a>
+    where
+        for<'de> T: Deserialize<'de> + 'static,
+        R: RangeArgument<NotNaN<f64>>,
+    {
+        match *self {
+            TreeSpaceEntry::Null => Box::new(empty()),
+            TreeSpaceEntry::FloatLeaf(ref float_map) => {
+                get_all_prims_conditional(float_map, condition)
+            }
+            TreeSpaceEntry::Branch(ref field_map) => match field_map.get(field) {
+                Some(entry) => entry.get_all_conditional("", condition),
+                None => panic!("No such field found!"),
+            },
+            _ => panic!("Not an int type or a struct holding an int"),
+        }
+    }
+
+    fn remove_conditional<T, R>(&mut self, field: &str, condition: R) -> Option<T>
+    where
+        for<'de> T: Serialize + Deserialize<'de>,
+        R: RangeArgument<NotNaN<f64>>,
+    {
+        match self.remove_float_conditional(field, condition) {
+            Some(arc) => match Arc::try_unwrap(arc) {
+                Ok(value) => from_value(deflatten(value)).ok(),
+                Err(_) => None,
+            },
+            None => None,
+        }
+    }
+
+    fn remove_all_conditional<'a, T, R>(&'a mut self, field: &str, condition: R) -> Vec<T>
+    where
+        for<'de> T: Deserialize<'de> + 'static,
+        R: RangeArgument<NotNaN<f64>>,
+    {
+        self.remove_all_float_conditional(field, condition)
+            .into_iter()
+            .filter_map(|arc| match Arc::try_unwrap(arc) {
+                Ok(value) => from_value(deflatten(value)).ok(),
+                Err(_) => None,
+            })
+            .collect()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -243,9 +310,10 @@ mod tests {
         name: String,
     }
 
-    #[derive(Serialize, Deserialize, PartialEq, Eq, Debug)]
+    #[derive(Serialize, Deserialize, PartialEq, Debug)]
     struct CompoundStruct {
         person: TestStruct,
+        gpa: f64,
     }
 
     #[test]
@@ -286,12 +354,14 @@ mod tests {
                 count: 5,
                 name: String::from("Duane"),
             },
+            gpa: 3.5,
         });
         compound_struct_entry.add(CompoundStruct {
             person: TestStruct {
                 count: 3,
                 name: String::from("Tuan"),
             },
+            gpa: 3.0,
         });
 
         assert_eq!(
@@ -301,6 +371,7 @@ mod tests {
                     count: 3,
                     name: String::from("Tuan"),
                 },
+                gpa: 3.0,
             })
         );
         assert!(
@@ -348,12 +419,14 @@ mod tests {
                 count: 3,
                 name: String::from("Tuan"),
             },
+            gpa: 3.0,
         });
         compound_struct_entry.add(CompoundStruct {
             person: TestStruct {
                 count: 5,
                 name: String::from("Duane"),
             },
+            gpa: 3.5,
         });
 
         assert_eq!(
@@ -363,6 +436,7 @@ mod tests {
                     count: 3,
                     name: String::from("Tuan"),
                 },
+                gpa: 3.0,
             })
         );
         assert!(
@@ -414,18 +488,21 @@ mod tests {
                 count: 5,
                 name: String::from("Duane"),
             },
+            gpa: 3.5,
         });
         compound_struct_entry.add(CompoundStruct {
             person: TestStruct {
                 count: 3,
                 name: String::from("Tuan"),
             },
+            gpa: 3.0,
         });
         compound_struct_entry.add(CompoundStruct {
             person: TestStruct {
                 count: 3,
                 name: String::from("Minh"),
             },
+            gpa: 3.0,
         });
 
         assert_eq!(
@@ -496,18 +573,21 @@ mod tests {
                 count: 5,
                 name: String::from("Duane"),
             },
+            gpa: 3.5,
         });
         compound_struct_entry.add(CompoundStruct {
             person: TestStruct {
                 count: 3,
                 name: String::from("Tuan"),
             },
+            gpa: 3.0,
         });
         compound_struct_entry.add(CompoundStruct {
             person: TestStruct {
                 count: 3,
                 name: String::from("Minh"),
             },
+            gpa: 3.0,
         });
 
         assert_eq!(
