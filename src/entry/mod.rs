@@ -21,6 +21,7 @@ use self::helpers::{deflatten, flatten, get_all_prims_from_map, get_primitive_fr
                     remove_all_prims_range, remove_object, remove_primitive_from_map,
                     remove_primitive_key, remove_primitive_range, remove_value_arc};
 pub use entry::range_entry::RangeEntry;
+pub use entry::exact_key_entry::ExactKeyEntry;
 
 pub enum TreeSpaceEntry {
     FloatLeaf(BTreeMap<NotNaN<f64>, Vec<Arc<Value>>>),
