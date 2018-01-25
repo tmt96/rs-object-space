@@ -7,10 +7,10 @@ use std::collections::range::RangeArgument;
 use serde_json::value::{from_value, Value};
 use serde::ser::Serialize;
 use serde::de::Deserialize;
+use ordered_float::NotNaN;
 
 use entry::helpers::{deflatten, get_all_prims_range};
 use entry::TreeSpaceEntry;
-use not_nan::NotNaN;
 
 pub trait RangeEntry<U> {
     fn get_range<T, R>(&self, field: &str, condition: R) -> Option<T>

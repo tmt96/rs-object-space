@@ -3,13 +3,14 @@ use std::sync::Arc;
 use std::borrow::Borrow;
 use std::cmp::Ord;
 use std::iter::IntoIterator;
+use std::collections::range::RangeArgument;
 
 use serde_json::value::{from_value, Value};
 use serde_json::map::Map;
 use serde::de::Deserialize;
-use std::collections::range::RangeArgument;
+use ordered_float::NotNaN;
+
 use entry::TreeSpaceEntry;
-use not_nan::NotNaN;
 
 pub fn get_primitive_from_map<U>(map: &BTreeMap<U, Vec<Arc<Value>>>) -> Option<Arc<Value>> {
     let mut iter = map.iter();

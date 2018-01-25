@@ -10,6 +10,7 @@ use serde_json::map::Map;
 use serde_json::Number;
 use serde::ser::Serialize;
 use serde::de::Deserialize;
+use ordered_float::NotNaN;
 
 mod range_entry;
 mod helpers;
@@ -18,7 +19,6 @@ use self::helpers::{deflatten, flatten, get_all_prims_from_map, get_primitive_fr
                     get_primitive_range, remove_all_prims_range, remove_object,
                     remove_primitive_from_map, remove_primitive_range, remove_value_arc};
 pub use entry::range_entry::RangeEntry;
-pub use not_nan::{FloatIsNaN, NotNaN};
 
 pub enum TreeSpaceEntry {
     FloatLeaf(BTreeMap<NotNaN<f64>, Vec<Arc<Value>>>),
