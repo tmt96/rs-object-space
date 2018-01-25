@@ -14,10 +14,12 @@ use ordered_float::NotNaN;
 
 mod range_entry;
 mod helpers;
+mod exact_key_entry;
 
 use self::helpers::{deflatten, flatten, get_all_prims_from_map, get_primitive_from_map,
-                    get_primitive_range, remove_all_prims_range, remove_object,
-                    remove_primitive_from_map, remove_primitive_range, remove_value_arc};
+                    get_primitive_key, get_primitive_range, remove_all_prims_key,
+                    remove_all_prims_range, remove_object, remove_primitive_from_map,
+                    remove_primitive_key, remove_primitive_range, remove_value_arc};
 pub use entry::range_entry::RangeEntry;
 
 pub enum TreeSpaceEntry {
@@ -204,6 +206,66 @@ impl TreeSpaceEntry {
         }
     }
 
+    fn get_int_key_helper<R>(&self, field: &str, key: R) -> Option<Arc<Value>>
+    where
+        R: Into<i64>,
+    {
+        match *self {
+            TreeSpaceEntry::Null => None,
+            TreeSpaceEntry::IntLeaf(ref int_map) => get_primitive_key(int_map, key),
+            TreeSpaceEntry::Branch(ref field_map) => match field_map.get(field) {
+                Some(entry) => entry.get_int_key_helper("", key),
+                None => panic!("No such field found!"),
+            },
+            _ => panic!("Not an int type or a struct holding an int"),
+        }
+    }
+
+    fn get_string_key_helper<R>(&self, field: &str, key: R) -> Option<Arc<Value>>
+    where
+        R: Into<String>,
+    {
+        match *self {
+            TreeSpaceEntry::Null => None,
+            TreeSpaceEntry::StringLeaf(ref string_map) => get_primitive_key(string_map, key),
+            TreeSpaceEntry::Branch(ref field_map) => match field_map.get(field) {
+                Some(entry) => entry.get_string_key_helper("", key),
+                None => panic!("No such field found!"),
+            },
+            _ => panic!("Not an int type or a struct holding an int"),
+        }
+    }
+
+    fn get_bool_key_helper<R>(&self, field: &str, key: R) -> Option<Arc<Value>>
+    where
+        R: Into<bool>,
+    {
+        match *self {
+            TreeSpaceEntry::Null => None,
+            TreeSpaceEntry::BoolLeaf(ref bool_map) => get_primitive_key(bool_map, key),
+            TreeSpaceEntry::Branch(ref field_map) => match field_map.get(field) {
+                Some(entry) => entry.get_bool_key_helper("", key),
+                None => panic!("No such field found!"),
+            },
+            _ => panic!("Not an int type or a struct holding an int"),
+        }
+    }
+
+    fn get_float_key_helper<R>(&self, field: &str, key: R) -> Option<Arc<Value>>
+    where
+        R: Into<NotNaN<f64>>,
+    {
+        match *self {
+            TreeSpaceEntry::Null => None,
+            TreeSpaceEntry::FloatLeaf(ref float_map) => get_primitive_key(float_map, key),
+            TreeSpaceEntry::Branch(ref field_map) => match field_map.get(field) {
+                Some(entry) => entry.get_float_key_helper("", key),
+                None => panic!("No such field found!"),
+            },
+            _ => panic!("Not an int type or a struct holding an int"),
+        }
+    }
+
     fn remove_helper(&mut self) -> Option<Arc<Value>> {
         match *self {
             TreeSpaceEntry::Null => None,
@@ -322,6 +384,106 @@ impl TreeSpaceEntry {
         }
     }
 
+    fn remove_int_key<R>(&mut self, field: &str, key: R) -> Option<Arc<Value>>
+    where
+        R: Into<i64>,
+    {
+        match *self {
+            TreeSpaceEntry::Null => None,
+            TreeSpaceEntry::IntLeaf(ref mut int_map) => remove_primitive_key(int_map, key),
+            TreeSpaceEntry::Branch(ref mut object_field_map) => {
+                let arc = match object_field_map.get_mut(field) {
+                    None => panic!("Field {} does not exist", field),
+                    Some(entry) => entry.remove_int_key(field, key),
+                };
+
+                match arc {
+                    Some(arc) => {
+                        remove_value_arc(object_field_map, &arc);
+                        Some(arc)
+                    }
+                    None => None,
+                }
+            }
+            _ => panic!("Not an int type or a struct holding an int"),
+        }
+    }
+
+    fn remove_string_key<R>(&mut self, field: &str, key: R) -> Option<Arc<Value>>
+    where
+        R: Into<String>,
+    {
+        match *self {
+            TreeSpaceEntry::Null => None,
+            TreeSpaceEntry::StringLeaf(ref mut string_map) => remove_primitive_key(string_map, key),
+            TreeSpaceEntry::Branch(ref mut object_field_map) => {
+                let arc = match object_field_map.get_mut(field) {
+                    None => panic!("Field {} does not exist", field),
+                    Some(entry) => entry.remove_string_key(field, key),
+                };
+
+                match arc {
+                    Some(arc) => {
+                        remove_value_arc(object_field_map, &arc);
+                        Some(arc)
+                    }
+                    None => None,
+                }
+            }
+            _ => panic!("Not an int type or a struct holding an int"),
+        }
+    }
+
+    fn remove_bool_key<R>(&mut self, field: &str, key: R) -> Option<Arc<Value>>
+    where
+        R: Into<bool>,
+    {
+        match *self {
+            TreeSpaceEntry::Null => None,
+            TreeSpaceEntry::BoolLeaf(ref mut bool_map) => remove_primitive_key(bool_map, key),
+            TreeSpaceEntry::Branch(ref mut object_field_map) => {
+                let arc = match object_field_map.get_mut(field) {
+                    None => panic!("Field {} does not exist", field),
+                    Some(entry) => entry.remove_bool_key(field, key),
+                };
+
+                match arc {
+                    Some(arc) => {
+                        remove_value_arc(object_field_map, &arc);
+                        Some(arc)
+                    }
+                    None => None,
+                }
+            }
+            _ => panic!("Not an int type or a struct holding an int"),
+        }
+    }
+
+    fn remove_float_key<R>(&mut self, field: &str, key: R) -> Option<Arc<Value>>
+    where
+        R: Into<NotNaN<f64>>,
+    {
+        match *self {
+            TreeSpaceEntry::Null => None,
+            TreeSpaceEntry::FloatLeaf(ref mut float_map) => remove_primitive_key(float_map, key),
+            TreeSpaceEntry::Branch(ref mut object_field_map) => {
+                let arc = match object_field_map.get_mut(field) {
+                    None => panic!("Field {} does not exist", field),
+                    Some(entry) => entry.remove_float_key(field, key),
+                };
+
+                match arc {
+                    Some(arc) => {
+                        remove_value_arc(object_field_map, &arc);
+                        Some(arc)
+                    }
+                    None => None,
+                }
+            }
+            _ => panic!("Not an int type or a struct holding an int"),
+        }
+    }
+
     fn remove_all_int_range<R>(&mut self, field: &str, condition: R) -> Vec<Arc<Value>>
     where
         R: RangeArgument<i64>,
@@ -413,6 +575,94 @@ impl TreeSpaceEntry {
                 arc_list
             }
             _ => panic!("Not an bool type or a struct holding an bool"),
+        }
+    }
+
+    fn remove_all_int_key<R>(&mut self, field: &str, key: R) -> Vec<Arc<Value>>
+    where
+        R: Into<i64>,
+    {
+        match *self {
+            TreeSpaceEntry::Null => Vec::new(),
+            TreeSpaceEntry::IntLeaf(ref mut int_map) => remove_all_prims_key(int_map, key),
+            TreeSpaceEntry::Branch(ref mut field_map) => {
+                let arc_list = match field_map.get_mut(field) {
+                    None => panic!("Field {} does not exist", field),
+                    Some(entry) => entry.remove_all_int_key(field, key),
+                };
+
+                for arc in arc_list.iter() {
+                    remove_value_arc(field_map, arc);
+                }
+                arc_list
+            }
+            _ => panic!("Not an int type or a struct holding an int"),
+        }
+    }
+
+    fn remove_all_string_key<R>(&mut self, field: &str, key: R) -> Vec<Arc<Value>>
+    where
+        R: Into<String>,
+    {
+        match *self {
+            TreeSpaceEntry::Null => Vec::new(),
+            TreeSpaceEntry::StringLeaf(ref mut string_map) => remove_all_prims_key(string_map, key),
+            TreeSpaceEntry::Branch(ref mut field_map) => {
+                let arc_list = match field_map.get_mut(field) {
+                    None => panic!("Field {} does not exist", field),
+                    Some(entry) => entry.remove_all_string_key(field, key),
+                };
+
+                for arc in arc_list.iter() {
+                    remove_value_arc(field_map, arc);
+                }
+                arc_list
+            }
+            _ => panic!("Not an int type or a struct holding an int"),
+        }
+    }
+
+    fn remove_all_bool_key<R>(&mut self, field: &str, key: R) -> Vec<Arc<Value>>
+    where
+        R: Into<bool>,
+    {
+        match *self {
+            TreeSpaceEntry::Null => Vec::new(),
+            TreeSpaceEntry::BoolLeaf(ref mut bool_map) => remove_all_prims_key(bool_map, key),
+            TreeSpaceEntry::Branch(ref mut field_map) => {
+                let arc_list = match field_map.get_mut(field) {
+                    None => panic!("Field {} does not exist", field),
+                    Some(entry) => entry.remove_all_bool_key(field, key),
+                };
+
+                for arc in arc_list.iter() {
+                    remove_value_arc(field_map, arc);
+                }
+                arc_list
+            }
+            _ => panic!("Not an int type or a struct holding an int"),
+        }
+    }
+
+    fn remove_all_float_key<R>(&mut self, field: &str, key: R) -> Vec<Arc<Value>>
+    where
+        R: Into<NotNaN<f64>>,
+    {
+        match *self {
+            TreeSpaceEntry::Null => Vec::new(),
+            TreeSpaceEntry::FloatLeaf(ref mut float_map) => remove_all_prims_key(float_map, key),
+            TreeSpaceEntry::Branch(ref mut field_map) => {
+                let arc_list = match field_map.get_mut(field) {
+                    None => panic!("Field {} does not exist", field),
+                    Some(entry) => entry.remove_all_float_key(field, key),
+                };
+
+                for arc in arc_list.iter() {
+                    remove_value_arc(field_map, arc);
+                }
+                arc_list
+            }
+            _ => panic!("Not an int type or a struct holding an int"),
         }
     }
 

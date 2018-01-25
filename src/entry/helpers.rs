@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 use std::borrow::Borrow;
 use std::cmp::Ord;
-use std::iter::IntoIterator;
+use std::iter::{empty, IntoIterator};
 use std::collections::range::RangeArgument;
 
 use serde_json::value::{from_value, Value};
@@ -39,6 +39,17 @@ where
     None
 }
 
+pub fn get_primitive_key<R, U>(map: &BTreeMap<U, Vec<Arc<Value>>>, key: R) -> Option<Arc<Value>>
+where
+    U: Ord,
+    R: Into<U>,
+{
+    match map.get(&key.into()) {
+        None => None,
+        Some(vec) => vec.get(0).map(|res| res.clone()),
+    }
+}
+
 pub fn get_all_prims_from_map<'a, T, U>(
     map: &'a BTreeMap<U, Vec<Arc<Value>>>,
 ) -> Box<Iterator<Item = T> + 'a>
@@ -72,6 +83,24 @@ where
     Box::new(iter)
 }
 
+pub fn get_all_prims_key<'a, T, R, U>(
+    map: &'a BTreeMap<U, Vec<Arc<Value>>>,
+    key: R,
+) -> Box<Iterator<Item = T> + 'a>
+where
+    for<'de> T: Deserialize<'de> + 'static,
+    U: Ord,
+    R: Into<U>,
+{
+    match map.get(&key.into()) {
+        None => Box::new(empty()),
+        Some(vec) => Box::new(vec.iter().filter_map(|item| {
+            let val: &Value = item.borrow();
+            from_value(deflatten(val.clone())).ok()
+        })),
+    }
+}
+
 pub fn remove_primitive_range<R, U>(
     map: &mut BTreeMap<U, Vec<Arc<Value>>>,
     condition: R,
@@ -89,6 +118,20 @@ where
     None
 }
 
+pub fn remove_primitive_key<R, U>(
+    map: &mut BTreeMap<U, Vec<Arc<Value>>>,
+    key: R,
+) -> Option<Arc<Value>>
+where
+    U: Ord,
+    R: Into<U>,
+{
+    match map.get_mut(&key.into()) {
+        None => None,
+        Some(vec) => vec.pop().map(|res| res.clone()),
+    }
+}
+
 pub fn remove_all_prims_range<'a, R, U>(
     map: &'a mut BTreeMap<U, Vec<Arc<Value>>>,
     condition: R,
@@ -100,6 +143,18 @@ where
     map.range_mut(condition)
         .flat_map(|(_, vec)| vec.drain(..))
         .collect()
+}
+
+pub fn remove_all_prims_key<'a, R, U>(
+    map: &'a mut BTreeMap<U, Vec<Arc<Value>>>,
+    key: R,
+) -> Vec<Arc<Value>>
+where
+    U: Ord,
+    R: Into<U>,
+{
+    map.get_mut(&key.into())
+        .map_or(Vec::new(), |vec| vec.drain(..).collect())
 }
 
 pub fn remove_primitive_from_map<U>(map: &mut BTreeMap<U, Vec<Arc<Value>>>) -> Option<Arc<Value>> {
