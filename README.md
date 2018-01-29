@@ -1,6 +1,6 @@
 # rObjectSpace
 
-An object store library for highly concurrent program written in Rust
+An object store library for highly concurrent program written in Rust. Find API & documentation at `src/lib.rs`.
 
 ## Building
 
