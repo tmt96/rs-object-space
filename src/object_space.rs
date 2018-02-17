@@ -1,10 +1,10 @@
-use std::collections::HashMap;
 use std::any::TypeId;
 use std::iter;
 use std::collections::range::RangeArgument;
 
 use serde::{Deserialize, Serialize};
 use ordered_float::NotNaN;
+use chashmap::{CHashMap, ReadGuard, WriteGuard};
 
 use entry::TreeSpaceEntry;
 use entry::RangeEntry;
@@ -158,17 +158,17 @@ pub trait ObjectSpace {
 }
 
 pub struct TreeObjectSpace {
-    typeid_entries_dict: HashMap<TypeId, TreeSpaceEntry>,
+    typeid_entries_dict: CHashMap<TypeId, TreeSpaceEntry>,
 }
 
 impl TreeObjectSpace {
     pub fn new() -> TreeObjectSpace {
         TreeObjectSpace {
-            typeid_entries_dict: HashMap::new(),
+            typeid_entries_dict: CHashMap::new(),
         }
     }
 
-    fn get_object_entry_ref<T>(&self) -> Option<&TreeSpaceEntry>
+    fn get_object_entry_ref<T>(&self) -> Option<ReadGuard<TypeId, TreeSpaceEntry>>
     where
         T: 'static,
     {
@@ -176,7 +176,7 @@ impl TreeObjectSpace {
         self.typeid_entries_dict.get(&type_id)
     }
 
-    fn get_object_entry_mut<T>(&mut self) -> Option<&mut TreeSpaceEntry>
+    fn get_object_entry_mut<T>(&mut self) -> Option<WriteGuard<TypeId, TreeSpaceEntry>>
     where
         T: 'static,
     {
@@ -193,10 +193,12 @@ impl ObjectSpace for TreeObjectSpace {
         let default_entry = TreeSpaceEntry::new();
         let type_id = TypeId::of::<T>();
 
+        if !self.typeid_entries_dict.contains_key(&type_id) {
+            self.typeid_entries_dict.insert(type_id, default_entry);
+        }
         self.typeid_entries_dict
-            .entry(type_id)
-            .or_insert(default_entry)
-            .add(obj);
+            .get_mut(&type_id)
+            .map(|mut guard| guard.add(obj));
     }
 
     fn try_read<T>(&self) -> Option<T>
@@ -214,7 +216,7 @@ impl ObjectSpace for TreeObjectSpace {
         for<'de> T: Serialize + Deserialize<'de> + 'static,
     {
         match self.get_object_entry_ref::<T>() {
-            Some(ent) => Box::new(ent.get_all::<T>()),
+            Some(ent) => Box::new(ent.get_all::<T>().collect::<Vec<T>>().into_iter()),
             None => Box::new(iter::empty::<T>()),
         }
     }
@@ -235,7 +237,7 @@ impl ObjectSpace for TreeObjectSpace {
         for<'de> T: Serialize + Deserialize<'de> + 'static,
     {
         match self.get_object_entry_mut::<T>() {
-            Some(ent) => ent.remove::<T>(),
+            Some(mut ent) => ent.remove::<T>(),
             None => None,
         }
     }
@@ -245,7 +247,7 @@ impl ObjectSpace for TreeObjectSpace {
         for<'de> T: Serialize + Deserialize<'de> + 'static,
     {
         match self.get_object_entry_mut::<T>() {
-            Some(entry) => Box::new(entry.remove_all::<T>().into_iter()),
+            Some(mut entry) => Box::new(entry.remove_all::<T>().into_iter()),
             None => Box::new(iter::empty::<T>()),
         }
     }
@@ -262,519 +264,519 @@ impl ObjectSpace for TreeObjectSpace {
     }
 }
 
-impl ObjectSpaceRange<i64> for TreeObjectSpace {
-    fn try_read_range<T, R>(&self, field: &str, condition: R) -> Option<T>
-    where
-        for<'de> T: Serialize + Deserialize<'de> + 'static,
-        R: RangeArgument<i64> + Clone,
-    {
-        match self.get_object_entry_ref::<T>() {
-            Some(entry) => entry.get_range::<T, _>(field, condition),
-            _ => None,
-        }
-    }
+// impl ObjectSpaceRange<i64> for TreeObjectSpace {
+//     fn try_read_range<T, R>(&self, field: &str, condition: R) -> Option<T>
+//     where
+//         for<'de> T: Serialize + Deserialize<'de> + 'static,
+//         R: RangeArgument<i64> + Clone,
+//     {
+//         match self.get_object_entry_ref::<T>() {
+//             Some(entry) => entry.get_range::<T, _>(field, condition),
+//             _ => None,
+//         }
+//     }
 
-    fn read_all_range<'a, T, R>(&'a self, field: &str, condition: R) -> Box<Iterator<Item = T> + 'a>
-    where
-        for<'de> T: Deserialize<'de> + 'static,
-        R: RangeArgument<i64> + Clone,
-    {
-        match self.get_object_entry_ref::<T>() {
-            Some(ent) => Box::new(ent.get_all_range::<T, _>(field, condition)),
-            None => Box::new(iter::empty::<T>()),
-        }
-    }
+//     fn read_all_range<'a, T, R>(&'a self, field: &str, condition: R) -> Box<Iterator<Item = T> + 'a>
+//     where
+//         for<'de> T: Deserialize<'de> + 'static,
+//         R: RangeArgument<i64> + Clone,
+//     {
+//         match self.get_object_entry_ref::<T>() {
+//             Some(ent) => Box::new(ent.get_all_range::<T, _>(field, condition)),
+//             None => Box::new(iter::empty::<T>()),
+//         }
+//     }
 
-    fn read_range<T, R>(&self, field: &str, condition: R) -> T
-    where
-        for<'de> T: Serialize + Deserialize<'de> + 'static,
-        R: RangeArgument<i64> + Clone,
-    {
-        loop {
-            if let Some(item) = self.try_read_range::<T, _>(field, condition.clone()) {
-                return item;
-            }
-        }
-    }
+//     fn read_range<T, R>(&self, field: &str, condition: R) -> T
+//     where
+//         for<'de> T: Serialize + Deserialize<'de> + 'static,
+//         R: RangeArgument<i64> + Clone,
+//     {
+//         loop {
+//             if let Some(item) = self.try_read_range::<T, _>(field, condition.clone()) {
+//                 return item;
+//             }
+//         }
+//     }
 
-    fn try_take_range<T, R>(&mut self, field: &str, condition: R) -> Option<T>
-    where
-        for<'de> T: Serialize + Deserialize<'de> + 'static,
-        R: RangeArgument<i64> + Clone,
-    {
-        match self.get_object_entry_mut::<T>() {
-            Some(entry) => entry.remove_range::<T, _>(field, condition),
-            _ => None,
-        }
-    }
+//     fn try_take_range<T, R>(&mut self, field: &str, condition: R) -> Option<T>
+//     where
+//         for<'de> T: Serialize + Deserialize<'de> + 'static,
+//         R: RangeArgument<i64> + Clone,
+//     {
+//         match self.get_object_entry_mut::<T>() {
+//             Some(entry) => entry.remove_range::<T, _>(field, condition),
+//             _ => None,
+//         }
+//     }
 
-    fn take_all_range<'a, T, R>(
-        &'a mut self,
-        field: &str,
-        condition: R,
-    ) -> Box<Iterator<Item = T> + 'a>
-    where
-        for<'de> T: Deserialize<'de> + 'static,
-        R: RangeArgument<i64> + Clone,
-    {
-        match self.get_object_entry_mut::<T>() {
-            Some(ent) => Box::new(ent.remove_all_range::<T, _>(field, condition).into_iter()),
-            None => Box::new(iter::empty::<T>()),
-        }
-    }
+//     fn take_all_range<'a, T, R>(
+//         &'a mut self,
+//         field: &str,
+//         condition: R,
+//     ) -> Box<Iterator<Item = T> + 'a>
+//     where
+//         for<'de> T: Deserialize<'de> + 'static,
+//         R: RangeArgument<i64> + Clone,
+//     {
+//         match self.get_object_entry_mut::<T>() {
+//             Some(ent) => Box::new(ent.remove_all_range::<T, _>(field, condition).into_iter()),
+//             None => Box::new(iter::empty::<T>()),
+//         }
+//     }
 
-    fn take_range<T, R>(&mut self, field: &str, condition: R) -> T
-    where
-        for<'de> T: Serialize + Deserialize<'de> + 'static,
-        R: RangeArgument<i64> + Clone,
-    {
-        loop {
-            if let Some(item) = self.try_read_range::<T, _>(field, condition.clone()) {
-                return item;
-            }
-        }
-    }
-}
+//     fn take_range<T, R>(&mut self, field: &str, condition: R) -> T
+//     where
+//         for<'de> T: Serialize + Deserialize<'de> + 'static,
+//         R: RangeArgument<i64> + Clone,
+//     {
+//         loop {
+//             if let Some(item) = self.try_read_range::<T, _>(field, condition.clone()) {
+//                 return item;
+//             }
+//         }
+//     }
+// }
 
-impl ObjectSpaceRange<String> for TreeObjectSpace {
-    fn try_read_range<T, R>(&self, field: &str, condition: R) -> Option<T>
-    where
-        for<'de> T: Serialize + Deserialize<'de> + 'static,
-        R: RangeArgument<String> + Clone,
-    {
-        match self.get_object_entry_ref::<T>() {
-            Some(entry) => entry.get_range::<T, _>(field, condition),
-            _ => None,
-        }
-    }
+// impl ObjectSpaceRange<String> for TreeObjectSpace {
+//     fn try_read_range<T, R>(&self, field: &str, condition: R) -> Option<T>
+//     where
+//         for<'de> T: Serialize + Deserialize<'de> + 'static,
+//         R: RangeArgument<String> + Clone,
+//     {
+//         match self.get_object_entry_ref::<T>() {
+//             Some(entry) => entry.get_range::<T, _>(field, condition),
+//             _ => None,
+//         }
+//     }
 
-    fn read_all_range<'a, T, R>(&'a self, field: &str, condition: R) -> Box<Iterator<Item = T> + 'a>
-    where
-        for<'de> T: Deserialize<'de> + 'static,
-        R: RangeArgument<String> + Clone,
-    {
-        match self.get_object_entry_ref::<T>() {
-            Some(ent) => Box::new(ent.get_all_range::<T, _>(field, condition)),
-            None => Box::new(iter::empty::<T>()),
-        }
-    }
+//     fn read_all_range<'a, T, R>(&'a self, field: &str, condition: R) -> Box<Iterator<Item = T> + 'a>
+//     where
+//         for<'de> T: Deserialize<'de> + 'static,
+//         R: RangeArgument<String> + Clone,
+//     {
+//         match self.get_object_entry_ref::<T>() {
+//             Some(ent) => Box::new(ent.get_all_range::<T, _>(field, condition)),
+//             None => Box::new(iter::empty::<T>()),
+//         }
+//     }
 
-    fn read_range<T, R>(&self, field: &str, condition: R) -> T
-    where
-        for<'de> T: Serialize + Deserialize<'de> + 'static,
-        R: RangeArgument<String> + Clone,
-    {
-        loop {
-            if let Some(item) = self.try_read_range::<T, _>(field, condition.clone()) {
-                return item;
-            }
-        }
-    }
+//     fn read_range<T, R>(&self, field: &str, condition: R) -> T
+//     where
+//         for<'de> T: Serialize + Deserialize<'de> + 'static,
+//         R: RangeArgument<String> + Clone,
+//     {
+//         loop {
+//             if let Some(item) = self.try_read_range::<T, _>(field, condition.clone()) {
+//                 return item;
+//             }
+//         }
+//     }
 
-    fn try_take_range<T, R>(&mut self, field: &str, condition: R) -> Option<T>
-    where
-        for<'de> T: Serialize + Deserialize<'de> + 'static,
-        R: RangeArgument<String> + Clone,
-    {
-        match self.get_object_entry_mut::<T>() {
-            Some(entry) => entry.remove_range::<T, _>(field, condition),
-            _ => None,
-        }
-    }
+//     fn try_take_range<T, R>(&mut self, field: &str, condition: R) -> Option<T>
+//     where
+//         for<'de> T: Serialize + Deserialize<'de> + 'static,
+//         R: RangeArgument<String> + Clone,
+//     {
+//         match self.get_object_entry_mut::<T>() {
+//             Some(entry) => entry.remove_range::<T, _>(field, condition),
+//             _ => None,
+//         }
+//     }
 
-    fn take_all_range<'a, T, R>(
-        &'a mut self,
-        field: &str,
-        condition: R,
-    ) -> Box<Iterator<Item = T> + 'a>
-    where
-        for<'de> T: Deserialize<'de> + 'static,
-        R: RangeArgument<String> + Clone,
-    {
-        match self.get_object_entry_mut::<T>() {
-            Some(ent) => Box::new(ent.remove_all_range::<T, _>(field, condition).into_iter()),
-            None => Box::new(iter::empty::<T>()),
-        }
-    }
+//     fn take_all_range<'a, T, R>(
+//         &'a mut self,
+//         field: &str,
+//         condition: R,
+//     ) -> Box<Iterator<Item = T> + 'a>
+//     where
+//         for<'de> T: Deserialize<'de> + 'static,
+//         R: RangeArgument<String> + Clone,
+//     {
+//         match self.get_object_entry_mut::<T>() {
+//             Some(ent) => Box::new(ent.remove_all_range::<T, _>(field, condition).into_iter()),
+//             None => Box::new(iter::empty::<T>()),
+//         }
+//     }
 
-    fn take_range<T, R>(&mut self, field: &str, condition: R) -> T
-    where
-        for<'de> T: Serialize + Deserialize<'de> + 'static,
-        R: RangeArgument<String> + Clone,
-    {
-        loop {
-            if let Some(item) = self.try_read_range::<T, _>(field, condition.clone()) {
-                return item;
-            }
-        }
-    }
-}
+//     fn take_range<T, R>(&mut self, field: &str, condition: R) -> T
+//     where
+//         for<'de> T: Serialize + Deserialize<'de> + 'static,
+//         R: RangeArgument<String> + Clone,
+//     {
+//         loop {
+//             if let Some(item) = self.try_read_range::<T, _>(field, condition.clone()) {
+//                 return item;
+//             }
+//         }
+//     }
+// }
 
-impl ObjectSpaceRange<bool> for TreeObjectSpace {
-    fn try_read_range<T, R>(&self, field: &str, key: R) -> Option<T>
-    where
-        for<'de> T: Serialize + Deserialize<'de> + 'static,
-        R: RangeArgument<bool> + Clone,
-    {
-        match self.get_object_entry_ref::<T>() {
-            Some(entry) => entry.get_range::<T, _>(field, key),
-            _ => None,
-        }
-    }
+// impl ObjectSpaceRange<bool> for TreeObjectSpace {
+//     fn try_read_range<T, R>(&self, field: &str, key: R) -> Option<T>
+//     where
+//         for<'de> T: Serialize + Deserialize<'de> + 'static,
+//         R: RangeArgument<bool> + Clone,
+//     {
+//         match self.get_object_entry_ref::<T>() {
+//             Some(entry) => entry.get_range::<T, _>(field, key),
+//             _ => None,
+//         }
+//     }
 
-    fn read_all_range<'a, T, R>(&'a self, field: &str, key: R) -> Box<Iterator<Item = T> + 'a>
-    where
-        for<'de> T: Deserialize<'de> + 'static,
-        R: RangeArgument<bool> + Clone,
-    {
-        match self.get_object_entry_ref::<T>() {
-            Some(ent) => Box::new(ent.get_all_range::<T, _>(field, key)),
-            None => Box::new(iter::empty::<T>()),
-        }
-    }
+//     fn read_all_range<'a, T, R>(&'a self, field: &str, key: R) -> Box<Iterator<Item = T> + 'a>
+//     where
+//         for<'de> T: Deserialize<'de> + 'static,
+//         R: RangeArgument<bool> + Clone,
+//     {
+//         match self.get_object_entry_ref::<T>() {
+//             Some(ent) => Box::new(ent.get_all_range::<T, _>(field, key)),
+//             None => Box::new(iter::empty::<T>()),
+//         }
+//     }
 
-    fn read_range<T, R>(&self, field: &str, key: R) -> T
-    where
-        for<'de> T: Serialize + Deserialize<'de> + 'static,
-        R: RangeArgument<bool> + Clone,
-    {
-        loop {
-            if let Some(item) = self.try_read_range::<T, _>(field, key.clone()) {
-                return item;
-            }
-        }
-    }
+//     fn read_range<T, R>(&self, field: &str, key: R) -> T
+//     where
+//         for<'de> T: Serialize + Deserialize<'de> + 'static,
+//         R: RangeArgument<bool> + Clone,
+//     {
+//         loop {
+//             if let Some(item) = self.try_read_range::<T, _>(field, key.clone()) {
+//                 return item;
+//             }
+//         }
+//     }
 
-    fn try_take_range<T, R>(&mut self, field: &str, key: R) -> Option<T>
-    where
-        for<'de> T: Serialize + Deserialize<'de> + 'static,
-        R: RangeArgument<bool> + Clone,
-    {
-        match self.get_object_entry_mut::<T>() {
-            Some(entry) => entry.remove_range::<T, _>(field, key),
-            _ => None,
-        }
-    }
+//     fn try_take_range<T, R>(&mut self, field: &str, key: R) -> Option<T>
+//     where
+//         for<'de> T: Serialize + Deserialize<'de> + 'static,
+//         R: RangeArgument<bool> + Clone,
+//     {
+//         match self.get_object_entry_mut::<T>() {
+//             Some(entry) => entry.remove_range::<T, _>(field, key),
+//             _ => None,
+//         }
+//     }
 
-    fn take_all_range<'a, T, R>(&'a mut self, field: &str, key: R) -> Box<Iterator<Item = T> + 'a>
-    where
-        for<'de> T: Deserialize<'de> + 'static,
-        R: RangeArgument<bool> + Clone,
-    {
-        match self.get_object_entry_mut::<T>() {
-            Some(ent) => Box::new(ent.remove_all_range::<T, _>(field, key).into_iter()),
-            None => Box::new(iter::empty::<T>()),
-        }
-    }
+//     fn take_all_range<'a, T, R>(&'a mut self, field: &str, key: R) -> Box<Iterator<Item = T> + 'a>
+//     where
+//         for<'de> T: Deserialize<'de> + 'static,
+//         R: RangeArgument<bool> + Clone,
+//     {
+//         match self.get_object_entry_mut::<T>() {
+//             Some(ent) => Box::new(ent.remove_all_range::<T, _>(field, key).into_iter()),
+//             None => Box::new(iter::empty::<T>()),
+//         }
+//     }
 
-    fn take_range<T, R>(&mut self, field: &str, key: R) -> T
-    where
-        for<'de> T: Serialize + Deserialize<'de> + 'static,
-        R: RangeArgument<bool> + Clone,
-    {
-        loop {
-            if let Some(item) = self.try_read_range::<T, _>(field, key.clone()) {
-                return item;
-            }
-        }
-    }
-}
+//     fn take_range<T, R>(&mut self, field: &str, key: R) -> T
+//     where
+//         for<'de> T: Serialize + Deserialize<'de> + 'static,
+//         R: RangeArgument<bool> + Clone,
+//     {
+//         loop {
+//             if let Some(item) = self.try_read_range::<T, _>(field, key.clone()) {
+//                 return item;
+//             }
+//         }
+//     }
+// }
 
-impl ObjectSpaceKey<i64> for TreeObjectSpace {
-    fn try_read_key<T, R>(&self, field: &str, condition: R) -> Option<T>
-    where
-        for<'de> T: Serialize + Deserialize<'de> + 'static,
-        R: Into<i64> + Copy,
-    {
-        match self.get_object_entry_ref::<T>() {
-            Some(entry) => entry.get_key::<T, _>(field, condition),
-            _ => None,
-        }
-    }
+// impl ObjectSpaceKey<i64> for TreeObjectSpace {
+//     fn try_read_key<T, R>(&self, field: &str, condition: R) -> Option<T>
+//     where
+//         for<'de> T: Serialize + Deserialize<'de> + 'static,
+//         R: Into<i64> + Copy,
+//     {
+//         match self.get_object_entry_ref::<T>() {
+//             Some(entry) => entry.get_key::<T, _>(field, condition),
+//             _ => None,
+//         }
+//     }
 
-    fn read_all_key<'a, T, R>(&'a self, field: &str, condition: R) -> Box<Iterator<Item = T> + 'a>
-    where
-        for<'de> T: Deserialize<'de> + 'static,
-        R: Into<i64> + Copy,
-    {
-        match self.get_object_entry_ref::<T>() {
-            Some(ent) => Box::new(ent.get_all_key::<T, _>(field, condition)),
-            None => Box::new(iter::empty::<T>()),
-        }
-    }
+//     fn read_all_key<'a, T, R>(&'a self, field: &str, condition: R) -> Box<Iterator<Item = T> + 'a>
+//     where
+//         for<'de> T: Deserialize<'de> + 'static,
+//         R: Into<i64> + Copy,
+//     {
+//         match self.get_object_entry_ref::<T>() {
+//             Some(ent) => Box::new(ent.get_all_key::<T, _>(field, condition)),
+//             None => Box::new(iter::empty::<T>()),
+//         }
+//     }
 
-    fn read_key<T, R>(&self, field: &str, condition: R) -> T
-    where
-        for<'de> T: Serialize + Deserialize<'de> + 'static,
-        R: Into<i64> + Copy,
-    {
-        loop {
-            if let Some(item) = self.try_read_key::<T, _>(field, condition) {
-                return item;
-            }
-        }
-    }
+//     fn read_key<T, R>(&self, field: &str, condition: R) -> T
+//     where
+//         for<'de> T: Serialize + Deserialize<'de> + 'static,
+//         R: Into<i64> + Copy,
+//     {
+//         loop {
+//             if let Some(item) = self.try_read_key::<T, _>(field, condition) {
+//                 return item;
+//             }
+//         }
+//     }
 
-    fn try_take_key<T, R>(&mut self, field: &str, condition: R) -> Option<T>
-    where
-        for<'de> T: Serialize + Deserialize<'de> + 'static,
-        R: Into<i64> + Copy,
-    {
-        match self.get_object_entry_mut::<T>() {
-            Some(entry) => entry.remove_key::<T, _>(field, condition),
-            _ => None,
-        }
-    }
+//     fn try_take_key<T, R>(&mut self, field: &str, condition: R) -> Option<T>
+//     where
+//         for<'de> T: Serialize + Deserialize<'de> + 'static,
+//         R: Into<i64> + Copy,
+//     {
+//         match self.get_object_entry_mut::<T>() {
+//             Some(entry) => entry.remove_key::<T, _>(field, condition),
+//             _ => None,
+//         }
+//     }
 
-    fn take_all_key<'a, T, R>(
-        &'a mut self,
-        field: &str,
-        condition: R,
-    ) -> Box<Iterator<Item = T> + 'a>
-    where
-        for<'de> T: Deserialize<'de> + 'static,
-        R: Into<i64> + Copy,
-    {
-        match self.get_object_entry_mut::<T>() {
-            Some(ent) => Box::new(ent.remove_all_key::<T, _>(field, condition).into_iter()),
-            None => Box::new(iter::empty::<T>()),
-        }
-    }
+//     fn take_all_key<'a, T, R>(
+//         &'a mut self,
+//         field: &str,
+//         condition: R,
+//     ) -> Box<Iterator<Item = T> + 'a>
+//     where
+//         for<'de> T: Deserialize<'de> + 'static,
+//         R: Into<i64> + Copy,
+//     {
+//         match self.get_object_entry_mut::<T>() {
+//             Some(ent) => Box::new(ent.remove_all_key::<T, _>(field, condition).into_iter()),
+//             None => Box::new(iter::empty::<T>()),
+//         }
+//     }
 
-    fn take_key<T, R>(&mut self, field: &str, condition: R) -> T
-    where
-        for<'de> T: Serialize + Deserialize<'de> + 'static,
-        R: Into<i64> + Copy,
-    {
-        loop {
-            if let Some(item) = self.try_read_key::<T, _>(field, condition) {
-                return item;
-            }
-        }
-    }
-}
+//     fn take_key<T, R>(&mut self, field: &str, condition: R) -> T
+//     where
+//         for<'de> T: Serialize + Deserialize<'de> + 'static,
+//         R: Into<i64> + Copy,
+//     {
+//         loop {
+//             if let Some(item) = self.try_read_key::<T, _>(field, condition) {
+//                 return item;
+//             }
+//         }
+//     }
+// }
 
-impl ObjectSpaceKey<String> for TreeObjectSpace {
-    fn try_read_key<T, R>(&self, field: &str, condition: R) -> Option<T>
-    where
-        for<'de> T: Serialize + Deserialize<'de> + 'static,
-        R: Into<String> + Copy,
-    {
-        match self.get_object_entry_ref::<T>() {
-            Some(entry) => entry.get_key::<T, _>(field, condition),
-            _ => None,
-        }
-    }
+// impl ObjectSpaceKey<String> for TreeObjectSpace {
+//     fn try_read_key<T, R>(&self, field: &str, condition: R) -> Option<T>
+//     where
+//         for<'de> T: Serialize + Deserialize<'de> + 'static,
+//         R: Into<String> + Copy,
+//     {
+//         match self.get_object_entry_ref::<T>() {
+//             Some(entry) => entry.get_key::<T, _>(field, condition),
+//             _ => None,
+//         }
+//     }
 
-    fn read_all_key<'a, T, R>(&'a self, field: &str, condition: R) -> Box<Iterator<Item = T> + 'a>
-    where
-        for<'de> T: Deserialize<'de> + 'static,
-        R: Into<String> + Copy,
-    {
-        match self.get_object_entry_ref::<T>() {
-            Some(ent) => Box::new(ent.get_all_key::<T, _>(field, condition)),
-            None => Box::new(iter::empty::<T>()),
-        }
-    }
+//     fn read_all_key<'a, T, R>(&'a self, field: &str, condition: R) -> Box<Iterator<Item = T> + 'a>
+//     where
+//         for<'de> T: Deserialize<'de> + 'static,
+//         R: Into<String> + Copy,
+//     {
+//         match self.get_object_entry_ref::<T>() {
+//             Some(ent) => Box::new(ent.get_all_key::<T, _>(field, condition)),
+//             None => Box::new(iter::empty::<T>()),
+//         }
+//     }
 
-    fn read_key<T, R>(&self, field: &str, condition: R) -> T
-    where
-        for<'de> T: Serialize + Deserialize<'de> + 'static,
-        R: Into<String> + Copy,
-    {
-        loop {
-            if let Some(item) = self.try_read_key::<T, _>(field, condition) {
-                return item;
-            }
-        }
-    }
+//     fn read_key<T, R>(&self, field: &str, condition: R) -> T
+//     where
+//         for<'de> T: Serialize + Deserialize<'de> + 'static,
+//         R: Into<String> + Copy,
+//     {
+//         loop {
+//             if let Some(item) = self.try_read_key::<T, _>(field, condition) {
+//                 return item;
+//             }
+//         }
+//     }
 
-    fn try_take_key<T, R>(&mut self, field: &str, condition: R) -> Option<T>
-    where
-        for<'de> T: Serialize + Deserialize<'de> + 'static,
-        R: Into<String> + Copy,
-    {
-        match self.get_object_entry_mut::<T>() {
-            Some(entry) => entry.remove_key::<T, _>(field, condition),
-            _ => None,
-        }
-    }
+//     fn try_take_key<T, R>(&mut self, field: &str, condition: R) -> Option<T>
+//     where
+//         for<'de> T: Serialize + Deserialize<'de> + 'static,
+//         R: Into<String> + Copy,
+//     {
+//         match self.get_object_entry_mut::<T>() {
+//             Some(entry) => entry.remove_key::<T, _>(field, condition),
+//             _ => None,
+//         }
+//     }
 
-    fn take_all_key<'a, T, R>(
-        &'a mut self,
-        field: &str,
-        condition: R,
-    ) -> Box<Iterator<Item = T> + 'a>
-    where
-        for<'de> T: Deserialize<'de> + 'static,
-        R: Into<String> + Copy,
-    {
-        match self.get_object_entry_mut::<T>() {
-            Some(ent) => Box::new(ent.remove_all_key::<T, _>(field, condition).into_iter()),
-            None => Box::new(iter::empty::<T>()),
-        }
-    }
+//     fn take_all_key<'a, T, R>(
+//         &'a mut self,
+//         field: &str,
+//         condition: R,
+//     ) -> Box<Iterator<Item = T> + 'a>
+//     where
+//         for<'de> T: Deserialize<'de> + 'static,
+//         R: Into<String> + Copy,
+//     {
+//         match self.get_object_entry_mut::<T>() {
+//             Some(ent) => Box::new(ent.remove_all_key::<T, _>(field, condition).into_iter()),
+//             None => Box::new(iter::empty::<T>()),
+//         }
+//     }
 
-    fn take_key<T, R>(&mut self, field: &str, condition: R) -> T
-    where
-        for<'de> T: Serialize + Deserialize<'de> + 'static,
-        R: Into<String> + Copy,
-    {
-        loop {
-            if let Some(item) = self.try_read_key::<T, _>(field, condition) {
-                return item;
-            }
-        }
-    }
-}
+//     fn take_key<T, R>(&mut self, field: &str, condition: R) -> T
+//     where
+//         for<'de> T: Serialize + Deserialize<'de> + 'static,
+//         R: Into<String> + Copy,
+//     {
+//         loop {
+//             if let Some(item) = self.try_read_key::<T, _>(field, condition) {
+//                 return item;
+//             }
+//         }
+//     }
+// }
 
-impl ObjectSpaceKey<bool> for TreeObjectSpace {
-    fn try_read_key<T, R>(&self, field: &str, condition: R) -> Option<T>
-    where
-        for<'de> T: Serialize + Deserialize<'de> + 'static,
-        R: Into<bool> + Copy,
-    {
-        match self.get_object_entry_ref::<T>() {
-            Some(entry) => entry.get_key::<T, _>(field, condition),
-            _ => None,
-        }
-    }
+// impl ObjectSpaceKey<bool> for TreeObjectSpace {
+//     fn try_read_key<T, R>(&self, field: &str, condition: R) -> Option<T>
+//     where
+//         for<'de> T: Serialize + Deserialize<'de> + 'static,
+//         R: Into<bool> + Copy,
+//     {
+//         match self.get_object_entry_ref::<T>() {
+//             Some(entry) => entry.get_key::<T, _>(field, condition),
+//             _ => None,
+//         }
+//     }
 
-    fn read_all_key<'a, T, R>(&'a self, field: &str, condition: R) -> Box<Iterator<Item = T> + 'a>
-    where
-        for<'de> T: Deserialize<'de> + 'static,
-        R: Into<bool> + Copy,
-    {
-        match self.get_object_entry_ref::<T>() {
-            Some(ent) => Box::new(ent.get_all_key::<T, _>(field, condition)),
-            None => Box::new(iter::empty::<T>()),
-        }
-    }
+//     fn read_all_key<'a, T, R>(&'a self, field: &str, condition: R) -> Box<Iterator<Item = T> + 'a>
+//     where
+//         for<'de> T: Deserialize<'de> + 'static,
+//         R: Into<bool> + Copy,
+//     {
+//         match self.get_object_entry_ref::<T>() {
+//             Some(ent) => Box::new(ent.get_all_key::<T, _>(field, condition)),
+//             None => Box::new(iter::empty::<T>()),
+//         }
+//     }
 
-    fn read_key<T, R>(&self, field: &str, condition: R) -> T
-    where
-        for<'de> T: Serialize + Deserialize<'de> + 'static,
-        R: Into<bool> + Copy,
-    {
-        loop {
-            if let Some(item) = self.try_read_key::<T, _>(field, condition) {
-                return item;
-            }
-        }
-    }
+//     fn read_key<T, R>(&self, field: &str, condition: R) -> T
+//     where
+//         for<'de> T: Serialize + Deserialize<'de> + 'static,
+//         R: Into<bool> + Copy,
+//     {
+//         loop {
+//             if let Some(item) = self.try_read_key::<T, _>(field, condition) {
+//                 return item;
+//             }
+//         }
+//     }
 
-    fn try_take_key<T, R>(&mut self, field: &str, condition: R) -> Option<T>
-    where
-        for<'de> T: Serialize + Deserialize<'de> + 'static,
-        R: Into<bool> + Copy,
-    {
-        match self.get_object_entry_mut::<T>() {
-            Some(entry) => entry.remove_key::<T, _>(field, condition),
-            _ => None,
-        }
-    }
+//     fn try_take_key<T, R>(&mut self, field: &str, condition: R) -> Option<T>
+//     where
+//         for<'de> T: Serialize + Deserialize<'de> + 'static,
+//         R: Into<bool> + Copy,
+//     {
+//         match self.get_object_entry_mut::<T>() {
+//             Some(entry) => entry.remove_key::<T, _>(field, condition),
+//             _ => None,
+//         }
+//     }
 
-    fn take_all_key<'a, T, R>(
-        &'a mut self,
-        field: &str,
-        condition: R,
-    ) -> Box<Iterator<Item = T> + 'a>
-    where
-        for<'de> T: Deserialize<'de> + 'static,
-        R: Into<bool> + Copy,
-    {
-        match self.get_object_entry_mut::<T>() {
-            Some(ent) => Box::new(ent.remove_all_key::<T, _>(field, condition).into_iter()),
-            None => Box::new(iter::empty::<T>()),
-        }
-    }
+//     fn take_all_key<'a, T, R>(
+//         &'a mut self,
+//         field: &str,
+//         condition: R,
+//     ) -> Box<Iterator<Item = T> + 'a>
+//     where
+//         for<'de> T: Deserialize<'de> + 'static,
+//         R: Into<bool> + Copy,
+//     {
+//         match self.get_object_entry_mut::<T>() {
+//             Some(ent) => Box::new(ent.remove_all_key::<T, _>(field, condition).into_iter()),
+//             None => Box::new(iter::empty::<T>()),
+//         }
+//     }
 
-    fn take_key<T, R>(&mut self, field: &str, condition: R) -> T
-    where
-        for<'de> T: Serialize + Deserialize<'de> + 'static,
-        R: Into<bool> + Copy,
-    {
-        loop {
-            if let Some(item) = self.try_read_key::<T, _>(field, condition) {
-                return item;
-            }
-        }
-    }
-}
+//     fn take_key<T, R>(&mut self, field: &str, condition: R) -> T
+//     where
+//         for<'de> T: Serialize + Deserialize<'de> + 'static,
+//         R: Into<bool> + Copy,
+//     {
+//         loop {
+//             if let Some(item) = self.try_read_key::<T, _>(field, condition) {
+//                 return item;
+//             }
+//         }
+//     }
+// }
 
-impl ObjectSpaceKey<NotNaN<f64>> for TreeObjectSpace {
-    fn try_read_key<T, R>(&self, field: &str, condition: R) -> Option<T>
-    where
-        for<'de> T: Serialize + Deserialize<'de> + 'static,
-        R: Into<NotNaN<f64>> + Copy,
-    {
-        match self.get_object_entry_ref::<T>() {
-            Some(entry) => entry.get_key::<T, _>(field, condition),
-            _ => None,
-        }
-    }
+// impl ObjectSpaceKey<NotNaN<f64>> for TreeObjectSpace {
+//     fn try_read_key<T, R>(&self, field: &str, condition: R) -> Option<T>
+//     where
+//         for<'de> T: Serialize + Deserialize<'de> + 'static,
+//         R: Into<NotNaN<f64>> + Copy,
+//     {
+//         match self.get_object_entry_ref::<T>() {
+//             Some(entry) => entry.get_key::<T, _>(field, condition),
+//             _ => None,
+//         }
+//     }
 
-    fn read_all_key<'a, T, R>(&'a self, field: &str, condition: R) -> Box<Iterator<Item = T> + 'a>
-    where
-        for<'de> T: Deserialize<'de> + 'static,
-        R: Into<NotNaN<f64>> + Copy,
-    {
-        match self.get_object_entry_ref::<T>() {
-            Some(ent) => Box::new(ent.get_all_key::<T, _>(field, condition)),
-            None => Box::new(iter::empty::<T>()),
-        }
-    }
+//     fn read_all_key<'a, T, R>(&'a self, field: &str, condition: R) -> Box<Iterator<Item = T> + 'a>
+//     where
+//         for<'de> T: Deserialize<'de> + 'static,
+//         R: Into<NotNaN<f64>> + Copy,
+//     {
+//         match self.get_object_entry_ref::<T>() {
+//             Some(ent) => Box::new(ent.get_all_key::<T, _>(field, condition)),
+//             None => Box::new(iter::empty::<T>()),
+//         }
+//     }
 
-    fn read_key<T, R>(&self, field: &str, condition: R) -> T
-    where
-        for<'de> T: Serialize + Deserialize<'de> + 'static,
-        R: Into<NotNaN<f64>> + Copy,
-    {
-        loop {
-            if let Some(item) = self.try_read_key::<T, _>(field, condition) {
-                return item;
-            }
-        }
-    }
+//     fn read_key<T, R>(&self, field: &str, condition: R) -> T
+//     where
+//         for<'de> T: Serialize + Deserialize<'de> + 'static,
+//         R: Into<NotNaN<f64>> + Copy,
+//     {
+//         loop {
+//             if let Some(item) = self.try_read_key::<T, _>(field, condition) {
+//                 return item;
+//             }
+//         }
+//     }
 
-    fn try_take_key<T, R>(&mut self, field: &str, condition: R) -> Option<T>
-    where
-        for<'de> T: Serialize + Deserialize<'de> + 'static,
-        R: Into<NotNaN<f64>> + Copy,
-    {
-        match self.get_object_entry_mut::<T>() {
-            Some(entry) => entry.remove_key::<T, _>(field, condition),
-            _ => None,
-        }
-    }
+//     fn try_take_key<T, R>(&mut self, field: &str, condition: R) -> Option<T>
+//     where
+//         for<'de> T: Serialize + Deserialize<'de> + 'static,
+//         R: Into<NotNaN<f64>> + Copy,
+//     {
+//         match self.get_object_entry_mut::<T>() {
+//             Some(entry) => entry.remove_key::<T, _>(field, condition),
+//             _ => None,
+//         }
+//     }
 
-    fn take_all_key<'a, T, R>(
-        &'a mut self,
-        field: &str,
-        condition: R,
-    ) -> Box<Iterator<Item = T> + 'a>
-    where
-        for<'de> T: Deserialize<'de> + 'static,
-        R: Into<NotNaN<f64>> + Copy,
-    {
-        match self.get_object_entry_mut::<T>() {
-            Some(ent) => Box::new(ent.remove_all_key::<T, _>(field, condition).into_iter()),
-            None => Box::new(iter::empty::<T>()),
-        }
-    }
+//     fn take_all_key<'a, T, R>(
+//         &'a mut self,
+//         field: &str,
+//         condition: R,
+//     ) -> Box<Iterator<Item = T> + 'a>
+//     where
+//         for<'de> T: Deserialize<'de> + 'static,
+//         R: Into<NotNaN<f64>> + Copy,
+//     {
+//         match self.get_object_entry_mut::<T>() {
+//             Some(ent) => Box::new(ent.remove_all_key::<T, _>(field, condition).into_iter()),
+//             None => Box::new(iter::empty::<T>()),
+//         }
+//     }
 
-    fn take_key<T, R>(&mut self, field: &str, condition: R) -> T
-    where
-        for<'de> T: Serialize + Deserialize<'de> + 'static,
-        R: Into<NotNaN<f64>> + Copy,
-    {
-        loop {
-            if let Some(item) = self.try_read_key::<T, _>(field, condition) {
-                return item;
-            }
-        }
-    }
-}
+//     fn take_key<T, R>(&mut self, field: &str, condition: R) -> T
+//     where
+//         for<'de> T: Serialize + Deserialize<'de> + 'static,
+//         R: Into<NotNaN<f64>> + Copy,
+//     {
+//         loop {
+//             if let Some(item) = self.try_read_key::<T, _>(field, condition) {
+//                 return item;
+//             }
+//         }
+//     }
+// }
 
 mod tests {
     use super::*;

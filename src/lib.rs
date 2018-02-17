@@ -1,4 +1,5 @@
 #![feature(collections_range)]
+extern crate chashmap;
 extern crate num_traits;
 extern crate ordered_float;
 extern crate serde;
