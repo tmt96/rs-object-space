@@ -193,9 +193,8 @@ impl ObjectSpace for TreeObjectSpace {
         let default_entry = TreeSpaceEntry::new();
         let type_id = TypeId::of::<T>();
 
-        if !self.typeid_entries_dict.contains_key(&type_id) {
-            self.typeid_entries_dict.insert(type_id, default_entry);
-        }
+        self.typeid_entries_dict
+            .upsert(type_id, || default_entry, |_| ());
         self.typeid_entries_dict
             .get_mut(&type_id)
             .map(|mut guard| guard.add(obj));
