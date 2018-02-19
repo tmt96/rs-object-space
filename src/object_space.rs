@@ -41,7 +41,7 @@ pub trait ObjectSpaceRange<U>: ObjectSpace {
     /// Given a path to an element of the struct and a range of possible values,
     /// remove and return a struct whose specified element is within the range.
     /// The operation is non-blocking and will returns None if no struct satisfies condition.
-    fn try_take_range<T, R>(&mut self, field: &str, condition: R) -> Option<T>
+    fn try_take_range<T, R>(&self, field: &str, condition: R) -> Option<T>
     where
         for<'de> T: Serialize + Deserialize<'de> + 'static,
         R: RangeArgument<U> + Clone;
@@ -49,7 +49,7 @@ pub trait ObjectSpaceRange<U>: ObjectSpace {
     /// Given a path to an element of the struct and a range of possible values,
     /// remove and return all structs whose specified element is within the range.
     fn take_all_range<'a, T, R>(
-        &'a mut self,
+        &'a self,
         field: &str,
         condition: R,
     ) -> Box<Iterator<Item = T> + 'a>
@@ -60,7 +60,7 @@ pub trait ObjectSpaceRange<U>: ObjectSpace {
     /// Given a path to an element of the struct and a range of possible values,
     /// remove and return a struct whose specified element is within the range.
     /// The operation blocks until a struct satisfies the condition is found.
-    fn take_range<T, R>(&mut self, field: &str, condition: R) -> T
+    fn take_range<T, R>(&self, field: &str, condition: R) -> T
     where
         for<'de> T: Serialize + Deserialize<'de> + 'static,
         R: RangeArgument<U> + Clone;
@@ -93,14 +93,14 @@ pub trait ObjectSpaceKey<U>: ObjectSpace {
     /// Given a path to an element of the struct and a possible value,
     /// remove and return a struct whose specified element of the specified value.
     /// The operation is non-blocking and will returns None if no struct satisfies condition.
-    fn try_take_key<T, R>(&mut self, field: &str, key: R) -> Option<T>
+    fn try_take_key<T, R>(&self, field: &str, key: R) -> Option<T>
     where
         for<'de> T: Serialize + Deserialize<'de> + 'static,
         R: Into<U> + Copy;
 
     /// Given a path to an element of the struct and a possible value,
     /// remove and return all structs whose specified element of the specified value.
-    fn take_all_key<'a, T, R>(&'a mut self, field: &str, key: R) -> Box<Iterator<Item = T> + 'a>
+    fn take_all_key<'a, T, R>(&'a self, field: &str, key: R) -> Box<Iterator<Item = T> + 'a>
     where
         for<'de> T: Deserialize<'de> + 'static,
         R: Into<U> + Copy;
@@ -108,7 +108,7 @@ pub trait ObjectSpaceKey<U>: ObjectSpace {
     /// Given a path to an element of the struct and a possible value,
     /// remove and return a struct whose specified element of the specified value.
     /// The operation is blocks until an element satisfies the condition is found.
-    fn take_key<T, R>(&mut self, field: &str, key: R) -> T
+    fn take_key<T, R>(&self, field: &str, key: R) -> T
     where
         for<'de> T: Serialize + Deserialize<'de> + 'static,
         R: Into<U> + Copy;
@@ -116,7 +116,7 @@ pub trait ObjectSpaceKey<U>: ObjectSpace {
 
 pub trait ObjectSpace {
     /// Add a struct to the object space
-    fn write<T>(&mut self, obj: T)
+    fn write<T>(&self, obj: T)
     where
         for<'de> T: Serialize + Deserialize<'de> + 'static;
 
@@ -140,19 +140,19 @@ pub trait ObjectSpace {
 
     /// remove and return a struct of type T
     /// The operation is non-blocking and will returns None if no struct satisfies condition.
-    fn try_take<T>(&mut self) -> Option<T>
+    fn try_take<T>(&self) -> Option<T>
     where
         for<'de> T: Serialize + Deserialize<'de> + 'static;
 
     /// remove and return all structs of type T
     /// The operation is non-blocking and will returns None if no struct satisfies condition.
-    fn take_all<'a, T>(&'a mut self) -> Box<Iterator<Item = T> + 'a>
+    fn take_all<'a, T>(&'a self) -> Box<Iterator<Item = T> + 'a>
     where
         for<'de> T: Serialize + Deserialize<'de> + 'static;
 
     /// remove and return a struct of type T
     /// The operation blocks until such a struct is found.
-    fn take<T>(&mut self) -> T
+    fn take<T>(&self) -> T
     where
         for<'de> T: Serialize + Deserialize<'de> + 'static;
 }
@@ -176,7 +176,7 @@ impl TreeObjectSpace {
         self.typeid_entries_dict.get(&type_id)
     }
 
-    fn get_object_entry_mut<T>(&mut self) -> Option<WriteGuard<TypeId, TreeSpaceEntry>>
+    fn get_object_entry_mut<T>(&self) -> Option<WriteGuard<TypeId, TreeSpaceEntry>>
     where
         T: 'static,
     {
@@ -186,7 +186,7 @@ impl TreeObjectSpace {
 }
 
 impl ObjectSpace for TreeObjectSpace {
-    fn write<T>(&mut self, obj: T)
+    fn write<T>(&self, obj: T)
     where
         for<'de> T: Serialize + Deserialize<'de> + 'static,
     {
@@ -231,7 +231,7 @@ impl ObjectSpace for TreeObjectSpace {
         }
     }
 
-    fn try_take<T>(&mut self) -> Option<T>
+    fn try_take<T>(&self) -> Option<T>
     where
         for<'de> T: Serialize + Deserialize<'de> + 'static,
     {
@@ -241,7 +241,7 @@ impl ObjectSpace for TreeObjectSpace {
         }
     }
 
-    fn take_all<'a, T>(&'a mut self) -> Box<Iterator<Item = T> + 'a>
+    fn take_all<'a, T>(&'a self) -> Box<Iterator<Item = T> + 'a>
     where
         for<'de> T: Serialize + Deserialize<'de> + 'static,
     {
@@ -251,7 +251,7 @@ impl ObjectSpace for TreeObjectSpace {
         }
     }
 
-    fn take<T>(&mut self) -> T
+    fn take<T>(&self) -> T
     where
         for<'de> T: Serialize + Deserialize<'de> + 'static,
     {
@@ -305,7 +305,7 @@ macro_rules! object_range{
                     }
                 }
 
-                fn try_take_range<T, R>(&mut self, field: &str, condition: R) -> Option<T>
+                fn try_take_range<T, R>(&self, field: &str, condition: R) -> Option<T>
                 where
                     for<'de> T: Serialize + Deserialize<'de> + 'static,
                     R: RangeArgument<$ty> + Clone,
@@ -317,7 +317,7 @@ macro_rules! object_range{
                 }
 
                 fn take_all_range<'a, T, R>(
-                    &'a mut self,
+                    &'a self,
                     field: &str,
                     condition: R,
                 ) -> Box<Iterator<Item = T> + 'a>
@@ -331,7 +331,7 @@ macro_rules! object_range{
                     }
                 }
 
-                fn take_range<T, R>(&mut self, field: &str, condition: R) -> T
+                fn take_range<T, R>(&self, field: &str, condition: R) -> T
                 where
                     for<'de> T: Serialize + Deserialize<'de> + 'static,
                     R: RangeArgument<$ty> + Clone,
@@ -385,7 +385,7 @@ macro_rules! object_key{
                     }
                 }
 
-                fn try_take_key<T, R>(&mut self, field: &str, condition: R) -> Option<T>
+                fn try_take_key<T, R>(&self, field: &str, condition: R) -> Option<T>
                 where
                     for<'de> T: Serialize + Deserialize<'de> + 'static,
                     R: Into<$ty> + Copy,
@@ -397,7 +397,7 @@ macro_rules! object_key{
                 }
 
                 fn take_all_key<'a, T, R>(
-                    &'a mut self,
+                    &'a self,
                     field: &str,
                     condition: R,
                 ) -> Box<Iterator<Item = T> + 'a>
@@ -411,7 +411,7 @@ macro_rules! object_key{
                     }
                 }
 
-                fn take_key<T, R>(&mut self, field: &str, condition: R) -> T
+                fn take_key<T, R>(&self, field: &str, condition: R) -> T
                 where
                     for<'de> T: Serialize + Deserialize<'de> + 'static,
                     R: Into<$ty> + Copy,

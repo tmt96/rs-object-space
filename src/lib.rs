@@ -8,4 +8,5 @@ extern crate serde_derive;
 extern crate serde_json;
 
 pub mod object_space;
+pub mod agent;
 mod entry;
