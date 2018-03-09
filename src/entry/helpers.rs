@@ -39,12 +39,11 @@ where
     None
 }
 
-pub fn get_primitive_key<R, U>(map: &BTreeMap<U, Vec<Arc<Value>>>, key: R) -> Option<Arc<Value>>
+pub fn get_primitive_key<U>(map: &BTreeMap<U, Vec<Arc<Value>>>, key: &U) -> Option<Arc<Value>>
 where
     U: Ord,
-    R: Into<U>,
 {
-    match map.get(&key.into()) {
+    match map.get(key) {
         None => None,
         Some(vec) => vec.get(0).map(|res| res.clone()),
     }
@@ -83,16 +82,15 @@ where
     Box::new(iter)
 }
 
-pub fn get_all_prims_key<'a, T, R, U>(
+pub fn get_all_prims_key<'a, T, U>(
     map: &'a BTreeMap<U, Vec<Arc<Value>>>,
-    key: R,
+    key: &U,
 ) -> Box<Iterator<Item = T> + 'a>
 where
     for<'de> T: Deserialize<'de> + 'static,
     U: Ord,
-    R: Into<U>,
 {
-    match map.get(&key.into()) {
+    match map.get(key) {
         None => Box::new(empty()),
         Some(vec) => Box::new(vec.iter().filter_map(|item| {
             let val: &Value = item.borrow();
@@ -118,15 +116,14 @@ where
     None
 }
 
-pub fn remove_primitive_key<R, U>(
+pub fn remove_primitive_key<U>(
     map: &mut BTreeMap<U, Vec<Arc<Value>>>,
-    key: R,
+    key: &U,
 ) -> Option<Arc<Value>>
 where
     U: Ord,
-    R: Into<U>,
 {
-    match map.get_mut(&key.into()) {
+    match map.get_mut(key) {
         None => None,
         Some(vec) => vec.pop().map(|res| res.clone()),
     }
@@ -145,15 +142,14 @@ where
         .collect()
 }
 
-pub fn remove_all_prims_key<'a, R, U>(
+pub fn remove_all_prims_key<'a, U>(
     map: &'a mut BTreeMap<U, Vec<Arc<Value>>>,
-    key: R,
+    key: &U,
 ) -> Vec<Arc<Value>>
 where
     U: Ord,
-    R: Into<U>,
 {
-    map.get_mut(&key.into())
+    map.get_mut(key)
         .map_or(Vec::new(), |vec| vec.drain(..).collect())
 }
 

@@ -207,10 +207,7 @@ impl TreeSpaceEntry {
         }
     }
 
-    fn get_int_key_helper<R>(&self, field: &str, key: R) -> Option<Arc<Value>>
-    where
-        R: Into<i64>,
-    {
+    fn get_int_key_helper(&self, field: &str, key: &i64) -> Option<Arc<Value>> {
         match *self {
             TreeSpaceEntry::Null => None,
             TreeSpaceEntry::IntLeaf(ref int_map) => get_primitive_key(int_map, key),
@@ -222,13 +219,10 @@ impl TreeSpaceEntry {
         }
     }
 
-    fn get_string_key_helper<R>(&self, field: &str, key: R) -> Option<Arc<Value>>
-    where
-        R: Into<String>,
-    {
+    fn get_string_key_helper(&self, field: &str, key: &String) -> Option<Arc<Value>> {
         match *self {
             TreeSpaceEntry::Null => None,
-            TreeSpaceEntry::StringLeaf(ref string_map) => get_primitive_key(string_map, key),
+            TreeSpaceEntry::StringLeaf(ref string_map) => get_primitive_key(string_map, &key),
             TreeSpaceEntry::Branch(ref field_map) => match field_map.get(field) {
                 Some(entry) => entry.get_string_key_helper("", key),
                 None => panic!("No such field found!"),
@@ -237,10 +231,7 @@ impl TreeSpaceEntry {
         }
     }
 
-    fn get_bool_key_helper<R>(&self, field: &str, key: R) -> Option<Arc<Value>>
-    where
-        R: Into<bool>,
-    {
+    fn get_bool_key_helper(&self, field: &str, key: &bool) -> Option<Arc<Value>> {
         match *self {
             TreeSpaceEntry::Null => None,
             TreeSpaceEntry::BoolLeaf(ref bool_map) => get_primitive_key(bool_map, key),
@@ -252,10 +243,7 @@ impl TreeSpaceEntry {
         }
     }
 
-    fn get_float_key_helper<R>(&self, field: &str, key: R) -> Option<Arc<Value>>
-    where
-        R: Into<NotNaN<f64>>,
-    {
+    fn get_float_key_helper(&self, field: &str, key: &NotNaN<f64>) -> Option<Arc<Value>> {
         match *self {
             TreeSpaceEntry::Null => None,
             TreeSpaceEntry::FloatLeaf(ref float_map) => get_primitive_key(float_map, key),
@@ -385,10 +373,7 @@ impl TreeSpaceEntry {
         }
     }
 
-    fn remove_int_key<R>(&mut self, field: &str, key: R) -> Option<Arc<Value>>
-    where
-        R: Into<i64>,
-    {
+    fn remove_int_key(&mut self, field: &str, key: &i64) -> Option<Arc<Value>> {
         match *self {
             TreeSpaceEntry::Null => None,
             TreeSpaceEntry::IntLeaf(ref mut int_map) => remove_primitive_key(int_map, key),
@@ -410,10 +395,7 @@ impl TreeSpaceEntry {
         }
     }
 
-    fn remove_string_key<R>(&mut self, field: &str, key: R) -> Option<Arc<Value>>
-    where
-        R: Into<String>,
-    {
+    fn remove_string_key(&mut self, field: &str, key: &String) -> Option<Arc<Value>> {
         match *self {
             TreeSpaceEntry::Null => None,
             TreeSpaceEntry::StringLeaf(ref mut string_map) => remove_primitive_key(string_map, key),
@@ -435,10 +417,7 @@ impl TreeSpaceEntry {
         }
     }
 
-    fn remove_bool_key<R>(&mut self, field: &str, key: R) -> Option<Arc<Value>>
-    where
-        R: Into<bool>,
-    {
+    fn remove_bool_key(&mut self, field: &str, key: &bool) -> Option<Arc<Value>> {
         match *self {
             TreeSpaceEntry::Null => None,
             TreeSpaceEntry::BoolLeaf(ref mut bool_map) => remove_primitive_key(bool_map, key),
@@ -460,10 +439,7 @@ impl TreeSpaceEntry {
         }
     }
 
-    fn remove_float_key<R>(&mut self, field: &str, key: R) -> Option<Arc<Value>>
-    where
-        R: Into<NotNaN<f64>>,
-    {
+    fn remove_float_key(&mut self, field: &str, key: &NotNaN<f64>) -> Option<Arc<Value>> {
         match *self {
             TreeSpaceEntry::Null => None,
             TreeSpaceEntry::FloatLeaf(ref mut float_map) => remove_primitive_key(float_map, key),
@@ -579,10 +555,7 @@ impl TreeSpaceEntry {
         }
     }
 
-    fn remove_all_int_key<R>(&mut self, field: &str, key: R) -> Vec<Arc<Value>>
-    where
-        R: Into<i64>,
-    {
+    fn remove_all_int_key(&mut self, field: &str, key: &i64) -> Vec<Arc<Value>> {
         match *self {
             TreeSpaceEntry::Null => Vec::new(),
             TreeSpaceEntry::IntLeaf(ref mut int_map) => remove_all_prims_key(int_map, key),
@@ -601,10 +574,7 @@ impl TreeSpaceEntry {
         }
     }
 
-    fn remove_all_string_key<R>(&mut self, field: &str, key: R) -> Vec<Arc<Value>>
-    where
-        R: Into<String>,
-    {
+    fn remove_all_string_key(&mut self, field: &str, key: &String) -> Vec<Arc<Value>> {
         match *self {
             TreeSpaceEntry::Null => Vec::new(),
             TreeSpaceEntry::StringLeaf(ref mut string_map) => remove_all_prims_key(string_map, key),
@@ -623,10 +593,7 @@ impl TreeSpaceEntry {
         }
     }
 
-    fn remove_all_bool_key<R>(&mut self, field: &str, key: R) -> Vec<Arc<Value>>
-    where
-        R: Into<bool>,
-    {
+    fn remove_all_bool_key(&mut self, field: &str, key: &bool) -> Vec<Arc<Value>> {
         match *self {
             TreeSpaceEntry::Null => Vec::new(),
             TreeSpaceEntry::BoolLeaf(ref mut bool_map) => remove_all_prims_key(bool_map, key),
@@ -645,10 +612,7 @@ impl TreeSpaceEntry {
         }
     }
 
-    fn remove_all_float_key<R>(&mut self, field: &str, key: R) -> Vec<Arc<Value>>
-    where
-        R: Into<NotNaN<f64>>,
-    {
+    fn remove_all_float_key(&mut self, field: &str, key: &NotNaN<f64>) -> Vec<Arc<Value>> {
         match *self {
             TreeSpaceEntry::Null => Vec::new(),
             TreeSpaceEntry::FloatLeaf(ref mut float_map) => remove_all_prims_key(float_map, key),

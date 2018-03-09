@@ -12,32 +12,27 @@ use entry::helpers::{deflatten, get_all_prims_key};
 use entry::TreeSpaceEntry;
 
 pub trait ExactKeyEntry<U> {
-    fn get_key<T, R>(&self, field: &str, key: R) -> Option<T>
+    fn get_key<T>(&self, field: &str, key: &U) -> Option<T>
     where
-        for<'de> T: Serialize + Deserialize<'de>,
-        R: Into<U>;
+        for<'de> T: Serialize + Deserialize<'de>;
 
-    fn get_all_key<'a, T, R>(&'a self, field: &str, key: R) -> Box<Iterator<Item = T> + 'a>
+    fn get_all_key<'a, T>(&'a self, field: &str, key: &U) -> Box<Iterator<Item = T> + 'a>
     where
-        for<'de> T: Deserialize<'de> + 'static,
-        R: Into<U>;
+        for<'de> T: Deserialize<'de> + 'static;
 
-    fn remove_key<T, R>(&mut self, field: &str, key: R) -> Option<T>
+    fn remove_key<T>(&mut self, field: &str, key: &U) -> Option<T>
     where
-        for<'de> T: Serialize + Deserialize<'de>,
-        R: Into<U>;
+        for<'de> T: Serialize + Deserialize<'de>;
 
-    fn remove_all_key<'a, T, R>(&'a mut self, field: &str, key: R) -> Vec<T>
+    fn remove_all_key<'a, T>(&'a mut self, field: &str, key: &U) -> Vec<T>
     where
-        for<'de> T: Deserialize<'de> + 'static,
-        R: Into<U>;
+        for<'de> T: Deserialize<'de> + 'static;
 }
 
 impl ExactKeyEntry<i64> for TreeSpaceEntry {
-    fn get_key<T, R>(&self, field: &str, key: R) -> Option<T>
+    fn get_key<T>(&self, field: &str, key: &i64) -> Option<T>
     where
         for<'de> T: Serialize + Deserialize<'de>,
-        R: Into<i64>,
     {
         match self.get_int_key_helper(field, key) {
             Some(arc) => {
@@ -48,26 +43,24 @@ impl ExactKeyEntry<i64> for TreeSpaceEntry {
         }
     }
 
-    fn get_all_key<'a, T, R>(&'a self, field: &str, key: R) -> Box<Iterator<Item = T> + 'a>
+    fn get_all_key<'a, T>(&'a self, field: &str, key: &i64) -> Box<Iterator<Item = T> + 'a>
     where
         for<'de> T: Deserialize<'de> + 'static,
-        R: Into<i64>,
     {
         match *self {
             TreeSpaceEntry::Null => Box::new(empty()),
-            TreeSpaceEntry::IntLeaf(ref int_map) => get_all_prims_key(int_map, key),
+            TreeSpaceEntry::IntLeaf(ref int_map) => get_all_prims_key(int_map, &key),
             TreeSpaceEntry::Branch(ref field_map) => match field_map.get(field) {
-                Some(entry) => entry.get_all_key::<T, R>("", key),
+                Some(entry) => entry.get_all_key::<T>("", key),
                 None => panic!("No such field found!"),
             },
             _ => panic!("Not an int type or a struct holding an int"),
         }
     }
 
-    fn remove_key<T, R>(&mut self, field: &str, key: R) -> Option<T>
+    fn remove_key<T>(&mut self, field: &str, key: &i64) -> Option<T>
     where
         for<'de> T: Serialize + Deserialize<'de>,
-        R: Into<i64>,
     {
         match self.remove_int_key(field, key) {
             Some(arc) => match Arc::try_unwrap(arc) {
@@ -78,10 +71,9 @@ impl ExactKeyEntry<i64> for TreeSpaceEntry {
         }
     }
 
-    fn remove_all_key<'a, T, R>(&'a mut self, field: &str, key: R) -> Vec<T>
+    fn remove_all_key<'a, T>(&'a mut self, field: &str, key: &i64) -> Vec<T>
     where
         for<'de> T: Deserialize<'de> + 'static,
-        R: Into<i64>,
     {
         self.remove_all_int_key(field, key)
             .into_iter()
@@ -94,10 +86,9 @@ impl ExactKeyEntry<i64> for TreeSpaceEntry {
 }
 
 impl ExactKeyEntry<String> for TreeSpaceEntry {
-    fn get_key<T, R>(&self, field: &str, key: R) -> Option<T>
+    fn get_key<T>(&self, field: &str, key: &String) -> Option<T>
     where
         for<'de> T: Serialize + Deserialize<'de>,
-        R: Into<String>,
     {
         match self.get_string_key_helper(field, key) {
             Some(arc) => {
@@ -108,10 +99,9 @@ impl ExactKeyEntry<String> for TreeSpaceEntry {
         }
     }
 
-    fn get_all_key<'a, T, R>(&'a self, field: &str, key: R) -> Box<Iterator<Item = T> + 'a>
+    fn get_all_key<'a, T>(&'a self, field: &str, key: &String) -> Box<Iterator<Item = T> + 'a>
     where
         for<'de> T: Deserialize<'de> + 'static,
-        R: Into<String>,
     {
         match *self {
             TreeSpaceEntry::Null => Box::new(empty()),
@@ -124,10 +114,9 @@ impl ExactKeyEntry<String> for TreeSpaceEntry {
         }
     }
 
-    fn remove_key<T, R>(&mut self, field: &str, key: R) -> Option<T>
+    fn remove_key<T>(&mut self, field: &str, key: &String) -> Option<T>
     where
         for<'de> T: Serialize + Deserialize<'de>,
-        R: Into<String>,
     {
         match self.remove_string_key(field, key) {
             Some(arc) => match Arc::try_unwrap(arc) {
@@ -138,10 +127,9 @@ impl ExactKeyEntry<String> for TreeSpaceEntry {
         }
     }
 
-    fn remove_all_key<'a, T, R>(&'a mut self, field: &str, key: R) -> Vec<T>
+    fn remove_all_key<'a, T>(&'a mut self, field: &str, key: &String) -> Vec<T>
     where
         for<'de> T: Deserialize<'de> + 'static,
-        R: Into<String>,
     {
         self.remove_all_string_key(field, key)
             .into_iter()
@@ -154,10 +142,9 @@ impl ExactKeyEntry<String> for TreeSpaceEntry {
 }
 
 impl ExactKeyEntry<bool> for TreeSpaceEntry {
-    fn get_key<T, R>(&self, field: &str, key: R) -> Option<T>
+    fn get_key<T>(&self, field: &str, key: &bool) -> Option<T>
     where
         for<'de> T: Serialize + Deserialize<'de>,
-        R: Into<bool>,
     {
         match self.get_bool_key_helper(field, key) {
             Some(arc) => {
@@ -168,10 +155,9 @@ impl ExactKeyEntry<bool> for TreeSpaceEntry {
         }
     }
 
-    fn get_all_key<'a, T, R>(&'a self, field: &str, key: R) -> Box<Iterator<Item = T> + 'a>
+    fn get_all_key<'a, T>(&'a self, field: &str, key: &bool) -> Box<Iterator<Item = T> + 'a>
     where
         for<'de> T: Deserialize<'de> + 'static,
-        R: Into<bool>,
     {
         match *self {
             TreeSpaceEntry::Null => Box::new(empty()),
@@ -184,10 +170,9 @@ impl ExactKeyEntry<bool> for TreeSpaceEntry {
         }
     }
 
-    fn remove_key<T, R>(&mut self, field: &str, key: R) -> Option<T>
+    fn remove_key<T>(&mut self, field: &str, key: &bool) -> Option<T>
     where
         for<'de> T: Serialize + Deserialize<'de>,
-        R: Into<bool>,
     {
         match self.remove_bool_key(field, key) {
             Some(arc) => match Arc::try_unwrap(arc) {
@@ -198,10 +183,9 @@ impl ExactKeyEntry<bool> for TreeSpaceEntry {
         }
     }
 
-    fn remove_all_key<'a, T, R>(&'a mut self, field: &str, key: R) -> Vec<T>
+    fn remove_all_key<'a, T>(&'a mut self, field: &str, key: &bool) -> Vec<T>
     where
         for<'de> T: Deserialize<'de> + 'static,
-        R: Into<bool>,
     {
         self.remove_all_bool_key(field, key)
             .into_iter()
@@ -214,10 +198,9 @@ impl ExactKeyEntry<bool> for TreeSpaceEntry {
 }
 
 impl ExactKeyEntry<NotNaN<f64>> for TreeSpaceEntry {
-    fn get_key<T, R>(&self, field: &str, key: R) -> Option<T>
+    fn get_key<T>(&self, field: &str, key: &NotNaN<f64>) -> Option<T>
     where
         for<'de> T: Serialize + Deserialize<'de>,
-        R: Into<NotNaN<f64>>,
     {
         match self.get_float_key_helper(field, key) {
             Some(arc) => {
@@ -228,10 +211,9 @@ impl ExactKeyEntry<NotNaN<f64>> for TreeSpaceEntry {
         }
     }
 
-    fn get_all_key<'a, T, R>(&'a self, field: &str, key: R) -> Box<Iterator<Item = T> + 'a>
+    fn get_all_key<'a, T>(&'a self, field: &str, key: &NotNaN<f64>) -> Box<Iterator<Item = T> + 'a>
     where
         for<'de> T: Deserialize<'de> + 'static,
-        R: Into<NotNaN<f64>>,
     {
         match *self {
             TreeSpaceEntry::Null => Box::new(empty()),
@@ -244,10 +226,9 @@ impl ExactKeyEntry<NotNaN<f64>> for TreeSpaceEntry {
         }
     }
 
-    fn remove_key<T, R>(&mut self, field: &str, key: R) -> Option<T>
+    fn remove_key<T>(&mut self, field: &str, key: &NotNaN<f64>) -> Option<T>
     where
         for<'de> T: Serialize + Deserialize<'de>,
-        R: Into<NotNaN<f64>>,
     {
         match self.remove_float_key(field, key) {
             Some(arc) => match Arc::try_unwrap(arc) {
@@ -258,10 +239,9 @@ impl ExactKeyEntry<NotNaN<f64>> for TreeSpaceEntry {
         }
     }
 
-    fn remove_all_key<'a, T, R>(&'a mut self, field: &str, key: R) -> Vec<T>
+    fn remove_all_key<'a, T>(&'a mut self, field: &str, key: &NotNaN<f64>) -> Vec<T>
     where
         for<'de> T: Deserialize<'de> + 'static,
-        R: Into<NotNaN<f64>>,
     {
         self.remove_all_float_key(field, key)
             .into_iter()
