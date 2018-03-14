@@ -169,17 +169,19 @@ impl Entry {
 }
 
 pub struct TreeObjectSpace {
-    typeid_entries_dict: CHashMap<TypeId, Entry>,
+    typeid_entries_dict: CHashMap<TypeId, TreeSpaceEntry>,
+    lock_dict: CHashMap<TypeId, Lock>,
 }
 
 impl TreeObjectSpace {
     pub fn new() -> TreeObjectSpace {
         TreeObjectSpace {
             typeid_entries_dict: CHashMap::new(),
+            lock_dict: CHashMap::new(),
         }
     }
 
-    fn get_object_entry_ref<T>(&self) -> Option<ReadGuard<TypeId, Entry>>
+    fn get_object_entry_ref<T>(&self) -> Option<ReadGuard<TypeId, TreeSpaceEntry>>
     where
         T: 'static,
     {
@@ -187,7 +189,7 @@ impl TreeObjectSpace {
         self.typeid_entries_dict.get(&type_id)
     }
 
-    fn get_object_entry_mut<T>(&self) -> Option<WriteGuard<TypeId, Entry>>
+    fn get_object_entry_mut<T>(&self) -> Option<WriteGuard<TypeId, TreeSpaceEntry>>
     where
         T: 'static,
     {
@@ -195,11 +197,21 @@ impl TreeObjectSpace {
         self.typeid_entries_dict.get_mut(&type_id)
     }
 
+    fn get_lock<T>(&self) -> Option<ReadGuard<TypeId, Lock>>
+    where
+        T: 'static,
+    {
+        let type_id = TypeId::of::<T>();
+        self.lock_dict.get(&type_id)
+    }
+
     fn add_entry(&self, id: TypeId) {
-        let default_value = Entry::new();
+        let default_value = TreeSpaceEntry::new();
 
         self.typeid_entries_dict
             .upsert(id, || default_value, |_| ());
+        self.lock_dict
+            .upsert(id, || Arc::new((Mutex::new(false), Condvar::new())), |_| ());
     }
 }
 
@@ -210,17 +222,11 @@ impl ObjectSpace for TreeObjectSpace {
     {
         let type_id = TypeId::of::<T>();
         self.add_entry(type_id);
-        match self.typeid_entries_dict.get_mut(&type_id) {
-            None => (),
-            Some(mut guard) => {
-                let &(ref lock, ref cvar) = &*guard.lock.clone();
-                let mut status = lock.lock().unwrap();
-                *status = true;
-                guard.collection.add(obj);
-                cvar.notify_all();
-                *status = false;
-            }
-        }
+        let &(ref lock, ref cvar) = &*self.get_lock::<T>().unwrap().clone();
+        let mut status = lock.lock().unwrap();
+        *status = !*status;
+        self.typeid_entries_dict.get_mut(&type_id).unwrap().add(obj);
+        cvar.notify_all();
     }
 
     fn try_read<T>(&self) -> Option<T>
@@ -228,7 +234,7 @@ impl ObjectSpace for TreeObjectSpace {
         for<'de> T: Serialize + Deserialize<'de> + 'static,
     {
         match self.get_object_entry_ref::<T>() {
-            Some(entry) => entry.collection.get::<T>(),
+            Some(entry) => entry.get::<T>(),
             _ => None,
         }
     }
@@ -238,12 +244,7 @@ impl ObjectSpace for TreeObjectSpace {
         for<'de> T: Serialize + Deserialize<'de> + 'static,
     {
         match self.get_object_entry_ref::<T>() {
-            Some(ent) => Box::new(
-                ent.collection
-                    .get_all::<T>()
-                    .collect::<Vec<T>>()
-                    .into_iter(),
-            ),
+            Some(ent) => Box::new(ent.get_all::<T>().collect::<Vec<T>>().into_iter()),
             None => Box::new(iter::empty::<T>()),
         }
     }
@@ -252,23 +253,16 @@ impl ObjectSpace for TreeObjectSpace {
     where
         for<'de> T: Serialize + Deserialize<'de> + 'static,
     {
-        match self.get_object_entry_ref::<T>() {
-            Some(entry) => {
-                let &(ref lock, ref cvar) = &*entry.lock.clone();
-                let mut fetched = lock.lock().unwrap();
+        self.add_entry(TypeId::of::<T>());
+        let &(ref lock, ref cvar) = &*self.get_lock::<T>().unwrap().clone();
+        let mut fetched = lock.lock().unwrap();
 
-                loop {
-                    fetched = cvar.wait(fetched).unwrap();
-                    let result = entry.collection.get::<T>();
-                    if let Some(item) = result {
-                        return item;
-                    }
-                }
+        loop {
+            let result = self.try_read::<T>();
+            if let Some(item) = result {
+                return item;
             }
-            _ => {
-                self.add_entry(TypeId::of::<T>());
-                self.read::<T>()
-            }
+            fetched = cvar.wait(fetched).unwrap();
         }
     }
 
@@ -277,7 +271,7 @@ impl ObjectSpace for TreeObjectSpace {
         for<'de> T: Serialize + Deserialize<'de> + 'static,
     {
         match self.get_object_entry_mut::<T>() {
-            Some(mut ent) => ent.collection.remove::<T>(),
+            Some(mut ent) => ent.remove::<T>(),
             None => None,
         }
     }
@@ -287,7 +281,7 @@ impl ObjectSpace for TreeObjectSpace {
         for<'de> T: Serialize + Deserialize<'de> + 'static,
     {
         match self.get_object_entry_mut::<T>() {
-            Some(mut entry) => Box::new(entry.collection.remove_all::<T>().into_iter()),
+            Some(mut entry) => Box::new(entry.remove_all::<T>().into_iter()),
             None => Box::new(iter::empty::<T>()),
         }
     }
@@ -296,23 +290,16 @@ impl ObjectSpace for TreeObjectSpace {
     where
         for<'de> T: Serialize + Deserialize<'de> + 'static,
     {
-        match self.get_object_entry_mut::<T>() {
-            Some(mut entry) => {
-                let &(ref lock, ref cvar) = &*entry.lock.clone();
-                let mut fetched = lock.lock().unwrap();
+        self.add_entry(TypeId::of::<T>());
+        let &(ref lock, ref cvar) = &*self.get_lock::<T>().unwrap().clone();
+        let mut fetched = lock.lock().unwrap();
 
-                loop {
-                    fetched = cvar.wait(fetched).unwrap();
-                    let result = entry.collection.remove::<T>();
-                    if let Some(item) = result {
-                        return item;
-                    }
-                }
+        loop {
+            let result = self.try_take::<T>();
+            if let Some(item) = result {
+                return item;
             }
-            _ => {
-                self.add_entry(TypeId::of::<T>());
-                self.read::<T>()
-            }
+            fetched = cvar.wait(fetched).unwrap();
         }
     }
 }
@@ -327,7 +314,7 @@ macro_rules! object_range{
                     R: RangeArgument<$ty> + Clone,
                 {
                     match self.get_object_entry_ref::<T>() {
-                        Some(entry) => entry.collection.get_range::<T, _>(field, condition),
+                        Some(entry) => entry.get_range::<T, _>(field, condition),
                         _ => None,
                     }
                 }
@@ -339,7 +326,7 @@ macro_rules! object_range{
                 {
                     match self.get_object_entry_ref::<T>() {
                         Some(ent) => Box::new(
-                            ent.collection.get_all_range::<T, _>(field, condition)
+                            ent.get_all_range::<T, _>(field, condition)
                                 .collect::<Vec<T>>()
                                 .into_iter(),
                         ),
@@ -352,23 +339,16 @@ macro_rules! object_range{
                     for<'de> T: Serialize + Deserialize<'de> + 'static,
                     R: RangeArgument<$ty> + Clone,
                 {
-                    match self.get_object_entry_ref::<T>() {
-                        Some(entry) => {
-                            let &(ref lock, ref cvar) = &*entry.lock.clone();
-                            let mut fetched = lock.lock().unwrap();
+                    self.add_entry(TypeId::of::<T>());
+                    let &(ref lock, ref cvar) = &*self.get_lock::<T>().unwrap().clone();
+                    let mut fetched = lock.lock().unwrap();
 
-                            loop {
-                                fetched = cvar.wait(fetched).unwrap();
-                                let result = entry.collection.get_range::<T, _>(field, condition.clone());
-                                if let Some(item) = result {
-                                    return item;
-                                }
-                            }
+                    loop {
+                        let result = self.try_read_range::<T, _>(field, condition.clone());
+                        if let Some(item) = result {
+                            return item;
                         }
-                        _ => {
-                            self.add_entry(TypeId::of::<T>());
-                            self.read_range::<T, R>(field, condition.clone())
-                        }
+                        fetched = cvar.wait(fetched).unwrap();
                     }
                 }
 
@@ -378,7 +358,7 @@ macro_rules! object_range{
                     R: RangeArgument<$ty> + Clone,
                 {
                     match self.get_object_entry_mut::<T>() {
-                        Some(mut entry) => entry.collection.remove_range::<T, _>(field, condition),
+                        Some(mut entry) => entry.remove_range::<T, _>(field, condition),
                         _ => None,
                     }
                 }
@@ -393,7 +373,7 @@ macro_rules! object_range{
                     R: RangeArgument<$ty> + Clone,
                 {
                     match self.get_object_entry_mut::<T>() {
-                        Some(mut ent) => Box::new(ent.collection.remove_all_range::<T, _>(field, condition).into_iter()),
+                        Some(mut ent) => Box::new(ent.remove_all_range::<T, _>(field, condition).into_iter()),
                         None => Box::new(iter::empty::<T>()),
                     }
                 }
@@ -403,23 +383,16 @@ macro_rules! object_range{
                     for<'de> T: Serialize + Deserialize<'de> + 'static,
                     R: RangeArgument<$ty> + Clone,
                 {
-                    match self.get_object_entry_mut::<T>() {
-                        Some(mut entry) => {
-                            let &(ref lock, ref cvar) = &*entry.lock.clone();
-                            let mut fetched = lock.lock().unwrap();
+                    self.add_entry(TypeId::of::<T>());
+                    let &(ref lock, ref cvar) = &*self.get_lock::<T>().unwrap().clone();
+                    let mut fetched = lock.lock().unwrap();
 
-                            loop {
-                                fetched = cvar.wait(fetched).unwrap();
-                                let result = entry.collection.remove_range::<T, _>(field, condition.clone());
-                                if let Some(item) = result {
-                                    return item;
-                                }
-                            }
+                    loop {
+                        let result = self.try_take_range::<T, _>(field, condition.clone());
+                        if let Some(item) = result {
+                            return item;
                         }
-                        _ => {
-                            self.add_entry(TypeId::of::<T>());
-                            self.take_range::<T, R>(field, condition.clone())
-                        }
+                        fetched = cvar.wait(fetched).unwrap();
                     }
                 }
             }
@@ -436,7 +409,7 @@ macro_rules! object_key{
                     for<'de> T: Serialize + Deserialize<'de> + 'static,
                 {
                     match self.get_object_entry_ref::<T>() {
-                        Some(entry) => entry.collection.get_key::<T>(field, condition),
+                        Some(entry) => entry.get_key::<T>(field, condition),
                         _ => None,
                     }
                 }
@@ -446,7 +419,7 @@ macro_rules! object_key{
                     for<'de> T: Deserialize<'de> + 'static,
                 {
                     match self.get_object_entry_ref::<T>() {
-                        Some(ent) => Box::new(ent.collection.get_all_key::<T>(field, condition).collect::<Vec<T>>().into_iter()),
+                        Some(ent) => Box::new(ent.get_all_key::<T>(field, condition).collect::<Vec<T>>().into_iter()),
                         None => Box::new(iter::empty::<T>()),
                     }
                 }
@@ -455,23 +428,16 @@ macro_rules! object_key{
                 where
                     for<'de> T: Serialize + Deserialize<'de> + 'static,
                 {
-                    match self.get_object_entry_ref::<T>() {
-                        Some(entry) => {
-                            let &(ref lock, ref cvar) = &*entry.lock.clone();
-                            let mut fetched = lock.lock().unwrap();
+                    self.add_entry(TypeId::of::<T>());
+                    let &(ref lock, ref cvar) = &*self.get_lock::<T>().unwrap().clone();
+                    let mut fetched = lock.lock().unwrap();
 
-                            loop {
-                                fetched = cvar.wait(fetched).unwrap();
-                                let result = entry.collection.get_key::<T>(field, condition);
-                                if let Some(item) = result {
-                                    return item;
-                                }
-                            }
+                    loop {
+                        let result = self.try_read_key::<T>(field, condition);
+                        if let Some(item) = result {
+                            return item;
                         }
-                        _ => {
-                            self.add_entry(TypeId::of::<T>());
-                            self.read_key::<T>(field, condition)
-                        }
+                        fetched = cvar.wait(fetched).unwrap();
                     }
                 }
 
@@ -480,7 +446,7 @@ macro_rules! object_key{
                     for<'de> T: Serialize + Deserialize<'de> + 'static,
                 {
                     match self.get_object_entry_mut::<T>() {
-                        Some(mut entry) => entry.collection.remove_key::<T>(field, condition),
+                        Some(mut entry) => entry.remove_key::<T>(field, condition),
                         _ => None,
                     }
                 }
@@ -494,7 +460,7 @@ macro_rules! object_key{
                     for<'de> T: Deserialize<'de> + 'static,
                 {
                     match self.get_object_entry_mut::<T>() {
-                        Some(mut ent) => Box::new(ent.collection.remove_all_key::<T>(field, condition).into_iter()),
+                        Some(mut ent) => Box::new(ent.remove_all_key::<T>(field, condition).into_iter()),
                         None => Box::new(iter::empty::<T>()),
                     }
                 }
@@ -503,23 +469,16 @@ macro_rules! object_key{
                 where
                     for<'de> T: Serialize + Deserialize<'de> + 'static,
                 {
-                    match self.get_object_entry_mut::<T>() {
-                        Some(mut entry) => {
-                            let &(ref lock, ref cvar) = &*entry.lock.clone();
-                            let mut fetched = lock.lock().unwrap();
+                    self.add_entry(TypeId::of::<T>());
+                    let &(ref lock, ref cvar) = &*self.get_lock::<T>().unwrap().clone();
+                    let mut fetched = lock.lock().unwrap();
 
-                            loop {
-                                fetched = cvar.wait(fetched).unwrap();
-                                let result = entry.collection.remove_key::<T>(field, condition);
-                                if let Some(item) = result {
-                                    return item;
-                                }
-                            }
+                    loop {
+                        let result = self.try_take_key::<T>(field, condition);
+                        if let Some(item) = result {
+                            return item;
                         }
-                        _ => {
-                            self.add_entry(TypeId::of::<T>());
-                            self.take_key::<T>(field, condition)
-                        }
+                        fetched = cvar.wait(fetched).unwrap();
                     }
                 }
             }
