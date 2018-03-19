@@ -1,0 +1,9 @@
+[submodule "primes"]
+	path = primes
+	url = /Users/tmt/Programming/rObjectSpace/examples/primes/
+[submodule "examples/primes"]
+	path = examples/primes
+	url = /Users/tmt/Programming/rObjectSpace/../primes
+[submodule "examples/reminder"]
+	path = examples/reminder
+	url = /Users/tmt/Programming/rObjectSpace/../obj_space_examples
