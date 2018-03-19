@@ -10,3 +10,6 @@ serde_json = "1.0"
 num-traits = "0.1.32"
 ordered-float = "0.5.0"
 chashmap = "2.2.0"
+
+[dev-dependencies]
+chrono = "0.4"
