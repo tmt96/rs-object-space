@@ -1,18 +1,34 @@
 {
-    // Use IntelliSense to learn about possible attributes.
-    // Hover to view descriptions of existing attributes.
-    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
-    "version": "0.2.0",
-    "configurations": [
-
-        {
-            "type": "lldb",
-            "request": "launch",
-            "name": "Debug",
-            "program": "cargo",
-            "args": ["test"],
-            "cwd": "${workspaceRoot}",
-            "preLaunchTask": "build",
-        }
-    ]
+  // Use IntelliSense to learn about possible attributes.
+  // Hover to view descriptions of existing attributes.
+  // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "type": "lldb",
+      "request": "launch",
+      "name": "Primes",
+      "program": "${workspaceFolder}/examples/primes",
+      "args": [100000],
+      "cwd": "${workspaceRoot}",
+      "preLaunchTask": "build primes"
+    },
+    {
+      "type": "lldb",
+      "request": "launch",
+      "name": "Debug",
+      "program": "cargo",
+      "args": ["test"],
+      "cwd": "${workspaceRoot}",
+      "preLaunchTask": "build lib"
+    },
+    {
+      "type": "lldb",
+      "request": "launch",
+      "name": "Reminder",
+      "program": "${workspaceFolder}/examples/reminder",
+      "cwd": "${workspaceRoot}",
+      "preLaunchTask": "build reminder"
+    }
+  ]
 }

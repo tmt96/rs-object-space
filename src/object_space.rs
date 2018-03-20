@@ -154,20 +154,6 @@ pub trait ObjectSpace {
 
 type Lock = Arc<(Mutex<bool>, Condvar)>;
 
-struct Entry {
-    collection: TreeSpaceEntry,
-    lock: Lock,
-}
-
-impl Entry {
-    fn new() -> Entry {
-        Entry {
-            collection: TreeSpaceEntry::new(),
-            lock: Arc::new((Mutex::new(false), Condvar::new())),
-        }
-    }
-}
-
 pub struct TreeObjectSpace {
     typeid_entries_dict: CHashMap<TypeId, TreeSpaceEntry>,
     lock_dict: CHashMap<TypeId, Lock>,
@@ -505,7 +491,7 @@ mod tests {
 
     #[test]
     fn try_read() {
-        let mut space = TreeObjectSpace::new();
+        let space = TreeObjectSpace::new();
         assert_eq!(space.try_read::<String>(), None);
         space.write(String::from("Hello World"));
         space.write(TestStruct {
@@ -547,7 +533,7 @@ mod tests {
 
     #[test]
     fn try_take() {
-        let mut space = TreeObjectSpace::new();
+        let space = TreeObjectSpace::new();
         assert_eq!(space.try_take::<String>(), None);
         space.write(String::from("Hello World"));
         space.write(TestStruct {
@@ -590,7 +576,7 @@ mod tests {
 
     #[test]
     fn read_all() {
-        let mut space = TreeObjectSpace::new();
+        let space = TreeObjectSpace::new();
         assert_eq!(space.read_all::<String>().count(), 0);
         space.write("Hello".to_string());
         space.write("World".to_string());
@@ -615,7 +601,7 @@ mod tests {
 
     #[test]
     fn take_all() {
-        let mut space = TreeObjectSpace::new();
+        let space = TreeObjectSpace::new();
         assert_eq!(space.take_all::<String>().count(), 0);
         space.write("Hello".to_string());
         space.write("World".to_string());
@@ -637,7 +623,7 @@ mod tests {
 
     #[test]
     fn try_read_range() {
-        let mut space = TreeObjectSpace::new();
+        let space = TreeObjectSpace::new();
         assert_eq!(space.try_read_range::<i64, _>("", 2..4), None);
         space.write::<i64>(3);
         space.write::<i64>(5);
@@ -698,7 +684,7 @@ mod tests {
 
     #[test]
     fn try_take_range() {
-        let mut space = TreeObjectSpace::new();
+        let space = TreeObjectSpace::new();
         assert_eq!(space.try_take_range::<i64, _>("", 2..4), None);
         space.write::<i64>(3);
         space.write::<i64>(5);
@@ -758,7 +744,7 @@ mod tests {
 
     #[test]
     fn read_all_range() {
-        let mut space = TreeObjectSpace::new();
+        let space = TreeObjectSpace::new();
         space.write::<i64>(3);
         space.write::<i64>(5);
         assert_eq!(space.read_all_range::<i64, _>("", 2..4).count(), 1);
@@ -822,7 +808,7 @@ mod tests {
 
     #[test]
     fn take_all_range() {
-        let mut space = TreeObjectSpace::new();
+        let space = TreeObjectSpace::new();
         space.write::<i64>(3);
         space.write::<i64>(5);
         assert_eq!(space.take_all_range::<i64, _>("", 2..4).count(), 1);
