@@ -10,11 +10,15 @@ use std::sync::Arc;
 use object_space::object_space::{ObjectSpace, ObjectSpaceKey, ObjectSpaceRange, TreeObjectSpace};
 
 fn main() {
-    let arg = env::args()
-        .nth(1)
+    let mut args = env::args();
+    let upper_lim = args.nth(1)
         .expect("please provide an input number")
         .parse::<i64>()
         .expect("please provide an integer input");
+
+    let thread_count = args.next()
+        .and_then(|input| input.parse::<i64>().ok())
+        .unwrap_or(4);
 
     // setup. add 2 & 3 just because we can
     let mut n = 4;
@@ -23,7 +27,7 @@ fn main() {
     space.write::<i64>(3);
 
     // create 4 worker threads
-    for _ in 0..4 {
+    for _ in 0..thread_count {
         let space_clone = space.clone();
         thread::spawn(move || {
             check_numbers(space_clone);
@@ -31,13 +35,15 @@ fn main() {
     }
 
     // continue until we hit limit
-    while n < arg {
-        let max = if n * n < arg { n * n } else { arg };
+    while n < upper_lim {
+        let max = if n * n < upper_lim { n * n } else { upper_lim };
 
-        for i in 0..4 {
-            // divide work evenly between 4 threads
-            let start = n + (((max - n) as f64) / 4.0 * (i as f64)).round() as i64;
-            let end = n + (((max - n) as f64) / 4.0 * ((i + 1) as f64)).round() as i64;
+        for i in 0..thread_count {
+            // divide work evenly between threads
+            let start =
+                n + (((max - n) as f64) / (thread_count as f64) * (i as f64)).round() as i64;
+            let end =
+                n + (((max - n) as f64) / (thread_count as f64) * ((i + 1) as f64)).round() as i64;
 
             let clone = space.clone();
             clone.write(Task {
@@ -48,7 +54,7 @@ fn main() {
         }
 
         // "joining" threads
-        for _ in 0..4 {
+        for _ in 0..thread_count {
             let clone = space.clone();
             clone.take_key::<Task>("finished", &true);
         }
@@ -68,7 +74,6 @@ fn check_numbers(space: Arc<TreeObjectSpace>) {
         let primes: Vec<i64> = space.read_all::<i64>().filter(|i| i * i < max).collect();
         for i in min..max {
             if primes.iter().all(|prime| i % prime != 0) {
-                // println!("value: {}", i);
                 space.write(i);
             }
         }
