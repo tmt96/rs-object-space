@@ -12,8 +12,7 @@ use object_space::object_space::{ObjectSpace, ObjectSpaceKey, ObjectSpaceRange, 
 fn main() {
     let mut args = env::args();
     let upper_lim = args.nth(1)
-        .expect("please provide an input number")
-        .parse::<i64>()
+        .and_then(|input| input.parse::<i64>().ok())
         .expect("please provide an integer input");
 
     let thread_count = args.next()

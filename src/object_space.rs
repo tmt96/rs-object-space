@@ -472,7 +472,7 @@ macro_rules! object_key{
     };
 }
 
-object_range!{i64 String bool}
+object_range!{i64 String}
 object_key!{i64 String bool /*NotNaN<f64>*/}
 
 mod tests {
