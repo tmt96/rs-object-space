@@ -10,6 +10,7 @@ This crate also provides a fully thread-safe implementation of ObjectSpace, whic
 # API
 
 An ObjectSpace could perform the following tasks:
+
 - `write` an object to the space. E.g: `space.write(test_struct)`
 - `try_read` (non-blocking), `read` (blocking), and `read_all` structs of a type. E.g: `space.try_read::<TestStruct>()`
 - `try_take`, `take`, and `take_all` to remove and returns struct of a type. E.g: `space.try_take::<TestStruct>()`

@@ -8,6 +8,8 @@ You need a nightly build of [Rust](https://www.rust-lang.org/) to build the libr
 
 To build the library, run `cargo build`, or `cargo build --release` to get the fully optimized version. To run the tests of the library, run `cargo test`
 
+To build documentation, run `cargo doc`. Documentation could be found at `target/doc/object_space/index.html`.
+
 ## Building & Running Examples
 
 There are two examples in `examples` folder: `primes` calculate all primes up to a number, and `reminder` is a simple reminder program using ObjectSpace.

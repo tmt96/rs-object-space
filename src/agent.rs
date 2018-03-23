@@ -81,7 +81,7 @@ pub trait Agent {
     }
 }
 
-trait AgentRange<U> {
+pub trait AgentRange<U> {
     type Space: ObjectSpaceRange<U>;
 
     fn get_space(&self) -> &Self::Space;
@@ -226,7 +226,7 @@ trait AgentRange<U> {
     }
 }
 
-trait AgentKey<U> {
+pub trait AgentKey<U> {
     type Space: ObjectSpaceKey<U>;
 
     fn get_space(&self) -> &Self::Space;
