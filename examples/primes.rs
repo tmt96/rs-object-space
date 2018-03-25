@@ -36,13 +36,15 @@ fn main() {
     // continue until we hit limit
     while n < upper_lim {
         let max = if n * n < upper_lim { n * n } else { upper_lim };
+        let mut current_pos = n as f64;
+        let mut end = n;
+        let gap = ((max - n) as f64) / (thread_count as f64);
 
-        for i in 0..thread_count {
+        for _ in 0..thread_count {
             // divide work evenly between threads
-            let start =
-                n + (((max - n) as f64) / (thread_count as f64) * (i as f64)).round() as i64;
-            let end =
-                n + (((max - n) as f64) / (thread_count as f64) * ((i + 1) as f64)).round() as i64;
+            let start = end;
+            current_pos = current_pos + gap;
+            end = current_pos.round() as i64;
 
             let clone = space.clone();
             clone.write(Task {
@@ -70,7 +72,8 @@ fn check_numbers(space: Arc<TreeObjectSpace>) {
         let task = space.take_key::<Task>("finished", &false);
         let max = task.end;
         let min = task.start;
-        let primes: Vec<i64> = space.read_all::<i64>().filter(|i| i * i < max).collect();
+        let upper_limit = (max as f64).sqrt() as i64 + 1;
+        let primes: Vec<i64> = space.read_all_range::<i64, _>("", ..upper_limit).collect();
         for i in min..max {
             if primes.iter().all(|prime| i % prime != 0) {
                 space.write(i);
