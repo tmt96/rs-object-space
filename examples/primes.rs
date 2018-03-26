@@ -7,7 +7,7 @@ use std::thread;
 use std::env;
 use std::sync::Arc;
 
-use object_space::object_space::{ObjectSpace, ObjectSpaceKey, ObjectSpaceRange, TreeObjectSpace};
+use object_space::{ObjectSpace, ObjectSpaceKey, ObjectSpaceRange, TreeObjectSpace};
 
 fn main() {
     let mut args = env::args();
@@ -19,6 +19,10 @@ fn main() {
         .and_then(|input| input.parse::<i64>().ok())
         .unwrap_or(4);
 
+    run(upper_lim, thread_count);
+}
+
+fn run(upper_lim: i64, thread_count: i64) {
     // setup. add 2 & 3 just because we can
     let mut n = 4;
     let space = Arc::new(TreeObjectSpace::new());

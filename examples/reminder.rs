@@ -13,7 +13,7 @@ use std::fmt;
 use std::time::Duration;
 
 use chrono::{DateTime, Duration as ChronoDuration, NaiveDateTime, Utc};
-use object_space::object_space::{ObjectSpace, ObjectSpaceKey, ObjectSpaceRange, TreeObjectSpace};
+use object_space::{ObjectSpace, ObjectSpaceKey, ObjectSpaceRange, TreeObjectSpace};
 
 fn main() {
     let store = ReminderStore::new();

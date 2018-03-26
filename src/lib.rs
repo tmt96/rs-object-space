@@ -22,10 +22,13 @@ Additionally, by implementing `ObjectSpaceKey` and `ObjectSpaceRange`, an Object
 E.g: Given a TestStruct:
 
 ```rust
+struct Prop {
+        touched: bool
+}
+
 struct TestStruct {
-index: i32,
-property: {
-    touched: bool
+    index: i32,
+    property: Prop,
 }
 ```
 
@@ -51,17 +54,12 @@ use std::thread;
 use std::env;
 use std::sync::Arc;
 
-use object_space::object_space::{ObjectSpace, ObjectSpaceKey, ObjectSpaceRange, TreeObjectSpace};
+use object_space::{ObjectSpace, ObjectSpaceKey, ObjectSpaceRange, TreeObjectSpace};
 
 fn main() {
     let mut args = env::args();
-    let upper_lim = args.nth(1)
-        .and_then(|input| input.parse::<i64>().ok())
-        .expect("please provide an integer input");
-
-    let thread_count = args.next()
-        .and_then(|input| input.parse::<i64>().ok())
-        .unwrap_or(4);
+    let upper_lim = 1000000;
+    let thread_count = 4;
 
     // setup. add 2 & 3 just because we can
     let mut n = 4;
@@ -142,6 +140,7 @@ extern crate serde;
 extern crate serde_derive;
 extern crate serde_json;
 
-pub mod object_space;
+pub use self::object_space::*;
+mod object_space;
 pub mod agent;
 mod entry;

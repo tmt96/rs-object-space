@@ -11,10 +11,186 @@ use entry::TreeSpaceEntry;
 use entry::RangeEntry;
 use entry::ExactKeyEntry;
 
+/// Basic interface of an ObjectSpace.
+/// This trait includes pushing, reading, and popping structs from the space.
+/// An implementation of ObjectSpace should be thread-safe for usage in concurrent programs.
+///
+/// # Example
+///
+/// ```
+/// # use object_space::{TreeObjectSpace, ObjectSpace};
+/// let space = TreeObjectSpace::new();
+/// space.write(String::from("Hello World"));
+/// assert_eq!(
+///     space.try_read::<String>(),
+///     Some(String::from("Hello World"))
+/// );
+/// ```
+pub trait ObjectSpace {
+    /// Add a struct to the object space
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # use object_space::{TreeObjectSpace, ObjectSpace};
+    /// let space = TreeObjectSpace::new();
+    /// space.write(String::from("Hello World"));
+    /// ```
+    fn write<T>(&self, obj: T)
+    where
+        for<'de> T: Serialize + Deserialize<'de> + 'static;
+
+    /// return a copy of a struct of type T
+    /// The operation is non-blocking
+    /// and will returns None if no struct satisfies condition.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # use object_space::{TreeObjectSpace, ObjectSpace};
+    /// let space = TreeObjectSpace::new();
+    /// space.write(String::from("Hello World"));
+    /// assert_eq!(
+    ///     space.try_read::<String>(),
+    ///     Some(String::from("Hello World"))
+    /// );
+    /// ```
+    fn try_read<T>(&self) -> Option<T>
+    where
+        for<'de> T: Serialize + Deserialize<'de> + 'static;
+
+    /// return copies of all structs of type T
+    /// The operation is non-blocking and will returns None if no struct satisfies condition.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # use object_space::{TreeObjectSpace, ObjectSpace};
+    /// let space = TreeObjectSpace::new();
+    /// assert_eq!(space.read_all::<String>().count(), 0);
+    /// space.write("Hello".to_string());
+    /// space.write("World".to_string());
+    ///
+    /// assert_eq!(
+    ///     space.read_all::<String>().collect::<Vec<String>>(),
+    ///     vec!["Hello", "World"]
+    /// );
+    /// ```
+    fn read_all<'a, T>(&'a self) -> Box<Iterator<Item = T> + 'a>
+    where
+        for<'de> T: Serialize + Deserialize<'de> + 'static;
+
+    /// return a copy of a struct of type T
+    /// The operation blocks until such a struct is found.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # use object_space::{TreeObjectSpace, ObjectSpace};
+    /// let space = TreeObjectSpace::new();
+    /// space.write(String::from("Hello World"));
+    /// assert_eq!(
+    ///     space.read::<String>(),
+    ///     String::from("Hello World")
+    /// );
+    /// ```
+    fn read<T>(&self) -> T
+    where
+        for<'de> T: Serialize + Deserialize<'de> + 'static;
+
+    /// remove and return a struct of type T
+    /// The operation is non-blocking and will returns None if no struct satisfies condition.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # use object_space::{TreeObjectSpace, ObjectSpace};
+    /// let space = TreeObjectSpace::new();
+    /// space.write(String::from("Hello World"));
+    /// assert_eq!(
+    ///     space.try_take::<String>(),
+    ///     Some(String::from("Hello World"))
+    /// );
+    /// assert_eq!(space.try_take::<String>(), None);
+    /// ```
+    fn try_take<T>(&self) -> Option<T>
+    where
+        for<'de> T: Serialize + Deserialize<'de> + 'static;
+
+    /// remove and return all structs of type T
+    /// The operation is non-blocking and will returns None if no struct satisfies condition.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # use object_space::{TreeObjectSpace, ObjectSpace};
+    /// let space = TreeObjectSpace::new();
+    /// assert_eq!(space.take_all::<String>().count(), 0);
+    /// space.write("Hello".to_string());
+    /// space.write("World".to_string());
+    ///
+    /// assert_eq!(
+    ///     space.take_all::<String>().collect::<Vec<String>>(),
+    ///     vec!["Hello", "World"]
+    /// );
+    /// assert_eq!(space.take_all::<String>().count(), 0);
+    /// ```
+    fn take_all<'a, T>(&'a self) -> Box<Iterator<Item = T> + 'a>
+    where
+        for<'de> T: Serialize + Deserialize<'de> + 'static;
+
+    /// remove and return a struct of type T
+    /// The operation blocks until such a struct is found.
+    /// # Example
+    ///
+    /// ```
+    /// # use object_space::{TreeObjectSpace, ObjectSpace};
+    /// let space = TreeObjectSpace::new();
+    /// space.write(String::from("Hello World"));
+    /// assert_eq!(
+    ///     space.take::<String>(),
+    ///     String::from("Hello World")
+    /// );
+    /// assert_eq!(space.try_take::<String>(), None);
+    /// ```
+    fn take<T>(&self) -> T
+    where
+        for<'de> T: Serialize + Deserialize<'de> + 'static;
+}
+
+/// An extension of ObjectSpace supporting retrieving structs by range of a field.
+/// Given a type `T` with a field (might be nested) of type `U`,
+/// a path to a field of type `U` and a `RangeArgument<U>`,
+/// an `ObjectSpaceRange<U>` could retrieve structs of type `T`
+/// whose value of the specified field is within the given range.
+///
+/// # Example
+///
+/// ```
+/// # use object_space::{TreeObjectSpace, ObjectSpace, ObjectSpaceRange};
+/// let space = TreeObjectSpace::new();
+/// space.write::<i64>(3);
+/// space.write::<i64>(5);
+///
+/// assert_eq!(space.try_read_range::<i64, _>("", 2..4), Some(3));
+/// assert_eq!(space.try_read_range::<i64, _>("", ..2), None);
+/// ```
 pub trait ObjectSpaceRange<U>: ObjectSpace {
     /// Given a path to an element of the struct and a range of possible values,
     /// return a copy of a struct whose specified element is within the range.
     /// The operation is non-blocking and will returns None if no struct satisfies condition.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # use object_space::{TreeObjectSpace, ObjectSpace, ObjectSpaceRange};
+    /// let space = TreeObjectSpace::new();
+    /// space.write::<i64>(3);
+    /// space.write::<i64>(5);
+    ///
+    /// assert_eq!(space.try_read_range::<i64, _>("", 2..4), Some(3));
+    /// assert_eq!(space.try_read_range::<i64, _>("", ..2), None);
+    /// ```
     fn try_read_range<T, R>(&self, field: &str, condition: R) -> Option<T>
     where
         for<'de> T: Serialize + Deserialize<'de> + 'static,
@@ -22,6 +198,18 @@ pub trait ObjectSpaceRange<U>: ObjectSpace {
 
     /// Given a path to an element of the struct and a range of possible values,
     /// return copies of all structs whose specified element is within the range.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # use object_space::{TreeObjectSpace, ObjectSpace, ObjectSpaceRange};
+    /// let space = TreeObjectSpace::new();
+    /// space.write::<i64>(3);
+    /// space.write::<i64>(5);
+    ///
+    /// assert_eq!(space.read_all_range::<i64, _>("", 2..4).count(), 1);
+    /// assert_eq!(space.read_all_range::<i64, _>("", 2..).count(), 2);
+    /// ```
     fn read_all_range<'a, T, R>(
         &'a self,
         field: &str,
@@ -34,6 +222,17 @@ pub trait ObjectSpaceRange<U>: ObjectSpace {
     /// Given a path to an element of the struct and a range of possible values,
     /// return a copy of a struct whose specified element is within the range.
     /// The operation blocks until a struct satisfies the condition is found.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # use object_space::{TreeObjectSpace, ObjectSpace, ObjectSpaceRange};
+    /// let space = TreeObjectSpace::new();
+    /// space.write::<i64>(3);
+    /// space.write::<i64>(5);
+    ///
+    /// assert_eq!(space.read_range::<i64, _>("", 2..4), 3);
+    /// ```
     fn read_range<T, R>(&self, field: &str, condition: R) -> T
     where
         for<'de> T: Serialize + Deserialize<'de> + 'static,
@@ -42,6 +241,19 @@ pub trait ObjectSpaceRange<U>: ObjectSpace {
     /// Given a path to an element of the struct and a range of possible values,
     /// remove and return a struct whose specified element is within the range.
     /// The operation is non-blocking and will returns None if no struct satisfies condition.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # use object_space::{TreeObjectSpace, ObjectSpace, ObjectSpaceRange};
+    /// let space = TreeObjectSpace::new();
+    /// space.write::<i64>(3);
+    /// space.write::<i64>(5);
+    ///
+    /// assert_eq!(space.try_take_range::<i64, _>("", 2..4), Some(3));
+    /// assert_eq!(space.try_take_range::<i64, _>("", 2..4), None);
+    /// assert_eq!(space.try_take_range::<i64, _>("", 2..), Some(5));
+    /// ```
     fn try_take_range<T, R>(&self, field: &str, condition: R) -> Option<T>
     where
         for<'de> T: Serialize + Deserialize<'de> + 'static,
@@ -49,6 +261,18 @@ pub trait ObjectSpaceRange<U>: ObjectSpace {
 
     /// Given a path to an element of the struct and a range of possible values,
     /// remove and return all structs whose specified element is within the range.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # use object_space::{TreeObjectSpace, ObjectSpace, ObjectSpaceRange};
+    /// let space = TreeObjectSpace::new();
+    /// space.write::<i64>(3);
+    /// space.write::<i64>(5);
+    ///
+    /// assert_eq!(space.take_all_range::<i64, _>("", 2..4).count(), 1);
+    /// assert_eq!(space.take_all_range::<i64, _>("", 2..).count(), 1);
+    /// ```
     fn take_all_range<'a, T, R>(
         &'a self,
         field: &str,
@@ -61,22 +285,75 @@ pub trait ObjectSpaceRange<U>: ObjectSpace {
     /// Given a path to an element of the struct and a range of possible values,
     /// remove and return a struct whose specified element is within the range.
     /// The operation blocks until a struct satisfies the condition is found.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # use object_space::{TreeObjectSpace, ObjectSpace, ObjectSpaceRange};
+    /// let space = TreeObjectSpace::new();
+    /// space.write::<i64>(3);
+    /// space.write::<i64>(5);
+    ///
+    /// assert_eq!(space.take_range::<i64, _>("", 2..4), 3);
+    /// assert_eq!(space.take_range::<i64, _>("", 2..), 5);
+    /// ```
     fn take_range<T, R>(&self, field: &str, condition: R) -> T
     where
         for<'de> T: Serialize + Deserialize<'de> + 'static,
         R: RangeArgument<U> + Clone;
 }
 
+/// An extension of ObjectSpace supporting retrieving structs by value of a field.
+/// Given a type `T` with a field (might be nested) of type `U`,
+/// a path to a field of type `U` and a value of type `U`,
+/// an `ObjectSpaceKey<U>` could retrieve structs of type `T`
+/// whose value of the specified field equals to the specified value.
+///
+/// # Example
+///
+/// ```
+/// # use object_space::{TreeObjectSpace, ObjectSpace, ObjectSpaceKey};
+/// let space = TreeObjectSpace::new();
+/// space.write::<i64>(3);
+/// space.write::<i64>(5);
+///
+/// assert_eq!(space.try_read_key::<i64>("", &3), Some(3));
+/// assert_eq!(space.try_read_key::<i64>("", &2), None);
+/// ```
 pub trait ObjectSpaceKey<U>: ObjectSpace {
     /// Given a path to an element of the struct and a possible value,
     /// return a copy of a struct whose specified element of the specified value.
     /// The operation is non-blocking and will returns None if no struct satisfies condition.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # use object_space::{TreeObjectSpace, ObjectSpace, ObjectSpaceKey};
+    /// let space = TreeObjectSpace::new();
+    /// space.write::<i64>(3);
+    /// space.write::<i64>(5);
+    ///
+    /// assert_eq!(space.try_read_key::<i64>("", &3), Some(3));
+    /// assert_eq!(space.try_read_key::<i64>("", &2), None);
+    /// ```
     fn try_read_key<T>(&self, field: &str, key: &U) -> Option<T>
     where
         for<'de> T: Serialize + Deserialize<'de> + 'static;
 
     /// Given a path to an element of the struct and a possible value,
     /// return copies of all structs whose specified element of the specified value.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # use object_space::{TreeObjectSpace, ObjectSpace, ObjectSpaceKey};
+    /// let space = TreeObjectSpace::new();
+    /// space.write::<i64>(3);
+    /// space.write::<i64>(5);
+    ///
+    /// assert_eq!(space.read_all_key::<i64>("", &3).count(), 1);
+    /// assert_eq!(space.read_all_key::<i64>("", &2).count(), 0);
+    /// ```
     fn read_all_key<'a, T>(&'a self, field: &str, key: &U) -> Box<Iterator<Item = T> + 'a>
     where
         for<'de> T: Deserialize<'de> + 'static;
@@ -84,6 +361,17 @@ pub trait ObjectSpaceKey<U>: ObjectSpace {
     /// Given a path to an element of the struct and a possible value,
     /// return a copy of a struct whose specified element of the specified value.
     /// The operation is blocks until an element satisfies the condition is found.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # use object_space::{TreeObjectSpace, ObjectSpace, ObjectSpaceKey};
+    /// let space = TreeObjectSpace::new();
+    /// space.write::<i64>(3);
+    /// space.write::<i64>(5);
+    ///
+    /// assert_eq!(space.read_key::<i64>("", &3), 3);
+    /// ```
     fn read_key<T>(&self, field: &str, key: &U) -> T
     where
         for<'de> T: Serialize + Deserialize<'de> + 'static;
@@ -91,12 +379,37 @@ pub trait ObjectSpaceKey<U>: ObjectSpace {
     /// Given a path to an element of the struct and a possible value,
     /// remove and return a struct whose specified element of the specified value.
     /// The operation is non-blocking and will returns None if no struct satisfies condition.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # use object_space::{TreeObjectSpace, ObjectSpace, ObjectSpaceKey};
+    /// let space = TreeObjectSpace::new();
+    /// space.write::<i64>(3);
+    /// space.write::<i64>(5);
+    ///
+    /// assert_eq!(space.try_take_key::<i64>("", &3), Some(3));
+    /// assert_eq!(space.try_take_key::<i64>("", &3), None);
+    /// assert_eq!(space.try_take_key::<i64>("", &4), None);
+    /// ```
     fn try_take_key<T>(&self, field: &str, key: &U) -> Option<T>
     where
         for<'de> T: Serialize + Deserialize<'de> + 'static;
 
     /// Given a path to an element of the struct and a possible value,
     /// remove and return all structs whose specified element of the specified value.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # use object_space::{TreeObjectSpace, ObjectSpace, ObjectSpaceKey};
+    /// let space = TreeObjectSpace::new();
+    /// space.write::<i64>(3);
+    /// space.write::<i64>(5);
+    ///
+    /// assert_eq!(space.take_all_key::<i64>("", &3).count(), 1);
+    /// assert_eq!(space.take_all_key::<i64>("", &4).count(), 0);
+    /// ```
     fn take_all_key<'a, T>(&'a self, field: &str, key: &U) -> Box<Iterator<Item = T> + 'a>
     where
         for<'de> T: Deserialize<'de> + 'static;
@@ -104,50 +417,18 @@ pub trait ObjectSpaceKey<U>: ObjectSpace {
     /// Given a path to an element of the struct and a possible value,
     /// remove and return a struct whose specified element of the specified value.
     /// The operation is blocks until an element satisfies the condition is found.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # use object_space::{TreeObjectSpace, ObjectSpace, ObjectSpaceKey};
+    /// let space = TreeObjectSpace::new();
+    /// space.write::<i64>(3);
+    /// space.write::<i64>(5);
+    ///
+    /// assert_eq!(space.take_key::<i64>("", &3), 3);
+    /// ```
     fn take_key<T>(&self, field: &str, key: &U) -> T
-    where
-        for<'de> T: Serialize + Deserialize<'de> + 'static;
-}
-
-pub trait ObjectSpace {
-    /// Add a struct to the object space
-    fn write<T>(&self, obj: T)
-    where
-        for<'de> T: Serialize + Deserialize<'de> + 'static;
-
-    /// return a copy of a struct of type T
-    /// The operation is non-blocking and will returns None if no struct satisfies condition.
-    fn try_read<T>(&self) -> Option<T>
-    where
-        for<'de> T: Serialize + Deserialize<'de> + 'static;
-
-    /// return copies of all structs of type T
-    /// The operation is non-blocking and will returns None if no struct satisfies condition.
-    fn read_all<'a, T>(&'a self) -> Box<Iterator<Item = T> + 'a>
-    where
-        for<'de> T: Serialize + Deserialize<'de> + 'static;
-
-    /// return a copy of a struct of type T
-    /// The operation blocks until such a struct is found.
-    fn read<T>(&self) -> T
-    where
-        for<'de> T: Serialize + Deserialize<'de> + 'static;
-
-    /// remove and return a struct of type T
-    /// The operation is non-blocking and will returns None if no struct satisfies condition.
-    fn try_take<T>(&self) -> Option<T>
-    where
-        for<'de> T: Serialize + Deserialize<'de> + 'static;
-
-    /// remove and return all structs of type T
-    /// The operation is non-blocking and will returns None if no struct satisfies condition.
-    fn take_all<'a, T>(&'a self) -> Box<Iterator<Item = T> + 'a>
-    where
-        for<'de> T: Serialize + Deserialize<'de> + 'static;
-
-    /// remove and return a struct of type T
-    /// The operation blocks until such a struct is found.
-    fn take<T>(&self) -> T
     where
         for<'de> T: Serialize + Deserialize<'de> + 'static;
 }
@@ -875,6 +1156,238 @@ mod tests {
         assert_eq!(
             space
                 .take_all_range::<CompoundStruct, _>("person.count", 4..)
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    fn try_read_key() {
+        let space = TreeObjectSpace::new();
+        assert_eq!(space.try_read_key::<i64>("", &3), None);
+        space.write::<i64>(3);
+        space.write::<i64>(5);
+
+        assert_eq!(space.try_read_key::<i64>("", &3), Some(3));
+        assert_eq!(space.try_read_key::<i64>("", &2), None);
+
+        space.write(TestStruct {
+            count: 3,
+            name: String::from("Tuan"),
+        });
+        space.write(TestStruct {
+            count: 5,
+            name: String::from("Duane"),
+        });
+
+        assert_eq!(
+            space.try_read_key::<TestStruct>("count", &3),
+            Some(TestStruct {
+                count: 3,
+                name: String::from("Tuan"),
+            })
+        );
+        assert!(space.try_read_key::<TestStruct>("count", &3).is_some());
+
+        space.write(CompoundStruct {
+            person: TestStruct {
+                count: 5,
+                name: String::from("Duane"),
+            },
+        });
+        space.write(CompoundStruct {
+            person: TestStruct {
+                count: 3,
+                name: String::from("Tuan"),
+            },
+        });
+
+        assert_eq!(
+            space.try_read_key::<CompoundStruct>("person.count", &3),
+            Some(CompoundStruct {
+                person: TestStruct {
+                    count: 3,
+                    name: String::from("Tuan"),
+                },
+            })
+        );
+        assert!(
+            space
+                .try_read_key::<CompoundStruct>("person.count", &3)
+                .is_some()
+        );
+    }
+
+    #[test]
+    fn try_take_key() {
+        let space = TreeObjectSpace::new();
+        assert_eq!(space.try_take_key::<i64>("", &3), None);
+        space.write::<i64>(3);
+        space.write::<i64>(5);
+        assert_eq!(space.try_take_key::<i64>("", &4), None);
+        assert_eq!(space.try_take_key::<i64>("", &3), Some(3));
+        assert_eq!(space.try_take_key::<i64>("", &3), None);
+
+        space.write(TestStruct {
+            count: 3,
+            name: String::from("Tuan"),
+        });
+        assert_eq!(
+            space.try_take_key::<TestStruct>("count", &3),
+            Some(TestStruct {
+                count: 3,
+                name: String::from("Tuan"),
+            })
+        );
+        assert!(space.try_take_key::<TestStruct>("count", &3).is_none());
+
+        space.write(CompoundStruct {
+            person: TestStruct {
+                count: 3,
+                name: String::from("Tuan"),
+            },
+        });
+
+        assert_eq!(
+            space.try_take_key::<CompoundStruct>("person.count", &3),
+            Some(CompoundStruct {
+                person: TestStruct {
+                    count: 3,
+                    name: String::from("Tuan"),
+                },
+            })
+        );
+        assert!(
+            space
+                .try_take_key::<CompoundStruct>("person.count", &3)
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn read_all_key() {
+        let space = TreeObjectSpace::new();
+        space.write::<i64>(3);
+        space.write::<i64>(5);
+        assert_eq!(space.read_all_key::<i64>("", &3).count(), 1);
+        assert_eq!(space.read_all_key::<i64>("", &4).count(), 0);
+
+        space.write(TestStruct {
+            count: 3,
+            name: String::from("Tuan"),
+        });
+        space.write(TestStruct {
+            count: 3,
+            name: String::from("Minh"),
+        });
+
+        space.write(TestStruct {
+            count: 5,
+            name: String::from("Duane"),
+        });
+
+        assert_eq!(space.read_all_key::<TestStruct>("count", &3).count(), 2);
+        assert_eq!(space.read_all_key::<TestStruct>("count", &4).count(), 0);
+
+        space.write(CompoundStruct {
+            person: TestStruct {
+                count: 5,
+                name: String::from("Duane"),
+            },
+        });
+        space.write(CompoundStruct {
+            person: TestStruct {
+                count: 3,
+                name: String::from("Tuan"),
+            },
+        });
+        space.write(CompoundStruct {
+            person: TestStruct {
+                count: 3,
+                name: String::from("Minh"),
+            },
+        });
+
+        assert_eq!(
+            space
+                .read_all_key::<CompoundStruct>("person.count", &3)
+                .count(),
+            2
+        );
+        assert_eq!(
+            space
+                .read_all_key::<CompoundStruct>("person.count", &4)
+                .count(),
+            0
+        );
+        assert_eq!(
+            space
+                .read_all_key::<CompoundStruct>("person.count", &5)
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    fn take_all_key() {
+        let space = TreeObjectSpace::new();
+        space.write::<i64>(3);
+        space.write::<i64>(5);
+        assert_eq!(space.take_all_key::<i64>("", &3).count(), 1);
+        assert_eq!(space.take_all_key::<i64>("", &4).count(), 0);
+
+        space.write(TestStruct {
+            count: 3,
+            name: String::from("Tuan"),
+        });
+        space.write(TestStruct {
+            count: 3,
+            name: String::from("Minh"),
+        });
+
+        space.write(TestStruct {
+            count: 5,
+            name: String::from("Duane"),
+        });
+
+        assert_eq!(space.take_all_key::<TestStruct>("count", &3).count(), 2);
+        assert_eq!(space.take_all_key::<TestStruct>("count", &3).count(), 0);
+        assert_eq!(space.take_all_key::<TestStruct>("count", &5).count(), 1);
+
+        space.write(CompoundStruct {
+            person: TestStruct {
+                count: 5,
+                name: String::from("Duane"),
+            },
+        });
+        space.write(CompoundStruct {
+            person: TestStruct {
+                count: 3,
+                name: String::from("Tuan"),
+            },
+        });
+        space.write(CompoundStruct {
+            person: TestStruct {
+                count: 3,
+                name: String::from("Minh"),
+            },
+        });
+
+        assert_eq!(
+            space
+                .take_all_key::<CompoundStruct>("person.count", &3)
+                .count(),
+            2
+        );
+        assert_eq!(
+            space
+                .take_all_key::<CompoundStruct>("person.count", &3)
+                .count(),
+            0
+        );
+        assert_eq!(
+            space
+                .take_all_key::<CompoundStruct>("person.count", &5)
                 .count(),
             1
         );
