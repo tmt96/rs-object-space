@@ -15,3 +15,11 @@ To build documentation, run `cargo doc`. Documentation could be found at `target
 There are two examples in `examples` folder: `primes` calculate all primes up to a number, and `reminder` is a simple reminder program using ObjectSpace.
 
 To build/run examples, do `cargo build(run) --example <example_name>`. For example: `cargo run --example reminder`
+
+## Issues
+
+See the [Issues section](https://github.com/tmt96/rObjectSpace/issues) for more info on ongoing issues. Currently, most important issues are:
+
+* [ ] Range & Value filtering for float fields #1
+* [ ] Enum Support #2
+* [ ] Complete Agent Interface #3
