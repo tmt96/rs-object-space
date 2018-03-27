@@ -12,6 +12,7 @@ use entry::RangeEntry;
 use entry::ExactKeyEntry;
 
 /// Basic interface of an ObjectSpace.
+///
 /// This trait includes pushing, reading, and popping structs from the space.
 /// An implementation of ObjectSpace should be thread-safe for usage in concurrent programs.
 ///
@@ -27,7 +28,7 @@ use entry::ExactKeyEntry;
 /// );
 /// ```
 pub trait ObjectSpace {
-    /// Add a struct to the object space
+    /// Add a struct to the object space.
     ///
     /// # Example
     ///
@@ -40,7 +41,7 @@ pub trait ObjectSpace {
     where
         for<'de> T: Serialize + Deserialize<'de> + 'static;
 
-    /// return a copy of a struct of type T
+    /// Return a copy of a struct of type T.
     /// The operation is non-blocking
     /// and will returns None if no struct satisfies condition.
     ///
@@ -59,7 +60,7 @@ pub trait ObjectSpace {
     where
         for<'de> T: Serialize + Deserialize<'de> + 'static;
 
-    /// return copies of all structs of type T
+    /// Return copies of all structs of type T.
     /// The operation is non-blocking and will returns None if no struct satisfies condition.
     ///
     /// # Example
@@ -80,7 +81,7 @@ pub trait ObjectSpace {
     where
         for<'de> T: Serialize + Deserialize<'de> + 'static;
 
-    /// return a copy of a struct of type T
+    /// Return a copy of a struct of type T.
     /// The operation blocks until such a struct is found.
     ///
     /// # Example
@@ -98,7 +99,7 @@ pub trait ObjectSpace {
     where
         for<'de> T: Serialize + Deserialize<'de> + 'static;
 
-    /// remove and return a struct of type T
+    /// Remove and return a struct of type T.
     /// The operation is non-blocking and will returns None if no struct satisfies condition.
     ///
     /// # Example
@@ -117,7 +118,7 @@ pub trait ObjectSpace {
     where
         for<'de> T: Serialize + Deserialize<'de> + 'static;
 
-    /// remove and return all structs of type T
+    /// Remove and return all structs of type T.
     /// The operation is non-blocking and will returns None if no struct satisfies condition.
     ///
     /// # Example
@@ -139,7 +140,7 @@ pub trait ObjectSpace {
     where
         for<'de> T: Serialize + Deserialize<'de> + 'static;
 
-    /// remove and return a struct of type T
+    /// Remove and return a struct of type T.
     /// The operation blocks until such a struct is found.
     /// # Example
     ///
@@ -158,7 +159,8 @@ pub trait ObjectSpace {
         for<'de> T: Serialize + Deserialize<'de> + 'static;
 }
 
-/// An extension of ObjectSpace supporting retrieving structs by range of a field.
+/// An extension of `ObjectSpace` supporting retrieving structs by range of a field.
+///
 /// Given a type `T` with a field (might be nested) of type `U`,
 /// a path to a field of type `U` and a `RangeArgument<U>`,
 /// an `ObjectSpaceRange<U>` could retrieve structs of type `T`
@@ -303,7 +305,8 @@ pub trait ObjectSpaceRange<U>: ObjectSpace {
         R: RangeArgument<U> + Clone;
 }
 
-/// An extension of ObjectSpace supporting retrieving structs by value of a field.
+/// An extension of `ObjectSpace` supporting retrieving structs by value of a field.
+///
 /// Given a type `T` with a field (might be nested) of type `U`,
 /// a path to a field of type `U` and a value of type `U`,
 /// an `ObjectSpaceKey<U>` could retrieve structs of type `T`
@@ -435,6 +438,20 @@ pub trait ObjectSpaceKey<U>: ObjectSpace {
 
 type Lock = Arc<(Mutex<bool>, Condvar)>;
 
+/// A thread-safe reference `ObjectSpace` implementation
+///
+/// # Implementation
+///
+/// A `TreeObjectSpace` is a `HashMap` between a `TypeId`
+/// and the actual `Entry` structure holding the structs.
+/// Before structs are stored in `Entry`,
+/// they are serialized into a JSON-like structure and then flattened.
+///
+/// An `Entry` is a `HashMap` whose key is a flattened field and
+/// value is a `BTreeMap` between possible values of the field
+/// and the `Vec` of structs containing the corresponding value of such field.
+///
+/// `Mutex` is used sparingly to ensure blocking `read` and `take` calls do not hijack CPU cycles
 pub struct TreeObjectSpace {
     typeid_entries_dict: CHashMap<TypeId, TreeSpaceEntry>,
     lock_dict: CHashMap<TypeId, Lock>,

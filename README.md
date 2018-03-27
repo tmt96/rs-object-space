@@ -1,6 +1,8 @@
 # rObjectSpace
 
-An object store library for highly concurrent program written in Rust. Find API & documentation at `src/object_space.rs`.
+An object store library for highly concurrent program written in Rust.
+
+To get documentation, run `cargo doc --open --no-deps`.
 
 ## Building
 
