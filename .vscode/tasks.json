@@ -45,6 +45,14 @@
       "args": ["build", "--all"],
       "problemMatcher": ["$rustc"],
       "group": { "kind": "build", "isDefault": true }
+    },
+    {
+      "type": "shell",
+      "label": "build mandelbrot",
+      "command": "cargo",
+      "args": ["build", "--example", "mandelbrot"],
+      "problemMatcher": ["$rustc"],
+      "group": "build"
     }
   ]
 }

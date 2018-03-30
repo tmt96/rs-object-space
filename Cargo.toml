@@ -13,3 +13,4 @@ chashmap = "2.2.0"
 
 [dev-dependencies]
 chrono = "0.4"
+image = "0.18"

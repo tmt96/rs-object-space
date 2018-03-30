@@ -8,7 +8,7 @@
       "type": "lldb",
       "request": "launch",
       "name": "Primes",
-      "program": "${workspaceFolder}/examples/primes",
+      "program": "${workspaceFolder}/target/debug/examples/primes",
       "args": [100000],
       "cwd": "${workspaceRoot}",
       "preLaunchTask": "build primes"
@@ -26,9 +26,17 @@
       "type": "lldb",
       "request": "launch",
       "name": "Reminder",
-      "program": "${workspaceFolder}/examples/reminder",
+      "program": "${workspaceFolder}/target/debug/examples/reminder",
       "cwd": "${workspaceRoot}",
       "preLaunchTask": "build reminder"
+    },
+    {
+      "type": "lldb",
+      "request": "launch",
+      "name": "Mandelbrot",
+      "program": "${workspaceFolder}/target/debug/examples/mandelbrot",
+      "cwd": "${workspaceRoot}",
+      "preLaunchTask": "build mandelbrot"
     }
   ]
 }
