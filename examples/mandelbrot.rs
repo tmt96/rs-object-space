@@ -4,10 +4,10 @@ extern crate serde;
 #[macro_use]
 extern crate serde_derive;
 
-use std::thread;
 use std::env;
-use std::sync::Arc;
 use std::ops::Range;
+use std::sync::Arc;
+use std::thread;
 
 use image::{ImageBuffer, Luma};
 use object_space::{ObjectSpace, ObjectSpaceKey, ObjectSpaceRange, TreeObjectSpace};
@@ -21,7 +21,7 @@ fn main() {
 
     let dim = args.nth(2)
         .and_then(|input| input.parse::<u32>().ok())
-        .unwrap_or(512);
+        .unwrap_or(1024);
 
     let max = args.nth(3)
         .and_then(|input| input.parse::<i32>().ok())
@@ -60,12 +60,12 @@ fn run(dim: u32, iter_count: i32, thread_count: i32) {
         }
     }
 
-    let mut buffer = ImageBuffer::new(dim, dim);
-
     for _ in 0..((task_count - 1) * (task_count - 1)) {
         let clone = space.clone();
         clone.take_key::<Task>("finished", &true);
     }
+
+    let mut buffer = ImageBuffer::new(dim, dim);
     space.take_all::<Pixel>().for_each(|pixel| {
         let brightness = if pixel.iter_count < iter_count {
             255
@@ -112,34 +112,6 @@ fn dummy(space: Arc<TreeObjectSpace>, dim: u32, max: i32) {
             col_range: col_range,
         });
     }
-}
-
-fn mandelbrot(dim: u32, max: u32) {
-    let mut buffer = ImageBuffer::new(dim, dim);
-    let row_range = 0..dim;
-    let col_range = 0..dim;
-    for row in row_range {
-        for col in col_range.clone() {
-            let c_re = ((col as f64) - (dim as f64) / 2.0) * 4.0 / (dim as f64);
-            let c_im = ((row as f64) - (dim as f64) / 2.0) * 4.0 / (dim as f64);
-            let mut x = 0.0;
-            let mut y = 0.0;
-            let mut i = 0;
-            while x * x + y * y < 4.0 && i < max {
-                let x_new = x * x - y * y + c_re;
-                y = 2.0 * x * y + c_im;
-                x = x_new;
-                i += 1;
-            }
-
-            if i >= max {
-                buffer.put_pixel(col, row, Luma { data: [0] });
-            } else {
-                buffer.put_pixel(col, row, Luma { data: [255] });
-            }
-        }
-    }
-    buffer.save("mandelbrot.png").unwrap();
 }
 
 #[derive(Serialize, Deserialize)]
