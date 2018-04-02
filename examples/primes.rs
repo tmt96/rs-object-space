@@ -3,9 +3,9 @@ extern crate serde;
 #[macro_use]
 extern crate serde_derive;
 
-use std::thread;
 use std::env;
 use std::sync::Arc;
+use std::thread;
 
 use object_space::{ObjectSpace, ObjectSpaceKey, ObjectSpaceRange, TreeObjectSpace};
 

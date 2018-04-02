@@ -1,15 +1,15 @@
 use std::any::TypeId;
-use std::iter;
 use std::collections::range::RangeArgument;
 use std::sync::{Arc, Condvar, Mutex};
+use std::thread;
 
-use serde::{Deserialize, Serialize};
-use ordered_float::NotNaN;
 use chashmap::{CHashMap, ReadGuard, WriteGuard};
+use ordered_float::NotNaN;
+use serde::{Deserialize, Serialize};
+use serde_json::value::{from_value, to_value};
 
-use entry::TreeSpaceEntry;
-use entry::RangeEntry;
-use entry::ExactKeyEntry;
+use entry::helpers::{deflatten, flatten};
+use entry::{ExactKeyEntry, RangeEntry, TreeSpaceEntry};
 
 /// Basic interface of an ObjectSpace.
 ///
@@ -465,7 +465,7 @@ impl TreeObjectSpace {
         }
     }
 
-    fn get_object_entry_ref<T>(&self) -> Option<ReadGuard<TypeId, TreeSpaceEntry>>
+    fn get_object_entry_ref<'a, T>(&'a self) -> Option<ReadGuard<TypeId, TreeSpaceEntry>>
     where
         T: 'static,
     {
@@ -507,9 +507,13 @@ impl ObjectSpace for TreeObjectSpace {
         let type_id = TypeId::of::<T>();
         self.add_entry(type_id);
         let &(ref lock, ref cvar) = &*self.get_lock::<T>().unwrap().clone();
+        let value = flatten(to_value(obj).expect("struct cannot be serialized"));
         let mut status = lock.lock().unwrap();
         *status = !*status;
-        self.typeid_entries_dict.get_mut(&type_id).unwrap().add(obj);
+        self.typeid_entries_dict
+            .get_mut(&type_id)
+            .unwrap()
+            .add(value);
         cvar.notify_all();
     }
 
@@ -517,8 +521,12 @@ impl ObjectSpace for TreeObjectSpace {
     where
         for<'de> T: Serialize + Deserialize<'de> + 'static,
     {
-        match self.get_object_entry_ref::<T>() {
-            Some(entry) => entry.get::<T>(),
+        let value = match self.get_object_entry_ref::<T>() {
+            Some(entry) => entry.get(),
+            _ => None,
+        };
+        match value {
+            Some(val) => from_value(deflatten(val)).ok(),
             _ => None,
         }
     }
@@ -527,10 +535,16 @@ impl ObjectSpace for TreeObjectSpace {
     where
         for<'de> T: Serialize + Deserialize<'de> + 'static,
     {
-        match self.get_object_entry_ref::<T>() {
-            Some(ent) => Box::new(ent.get_all::<T>().collect::<Vec<T>>().into_iter()),
-            None => Box::new(iter::empty::<T>()),
-        }
+        let val_iter: Vec<_> = match self.get_object_entry_ref::<T>() {
+            Some(ent) => ent.get_all().collect(),
+            None => Vec::new(),
+        };
+
+        Box::new(
+            val_iter
+                .into_iter()
+                .filter_map(|item| from_value(deflatten(item)).ok()),
+        )
     }
 
     fn read<T>(&self) -> T
@@ -539,24 +553,35 @@ impl ObjectSpace for TreeObjectSpace {
     {
         self.add_entry(TypeId::of::<T>());
         let &(ref lock, ref cvar) = &*self.get_lock::<T>().unwrap().clone();
-        let mut fetched = lock.lock().unwrap();
-
-        loop {
-            let result = self.try_read::<T>();
-            if let Some(item) = result {
-                return item;
+        let value;
+        {
+            let mut fetched = lock.lock().unwrap();
+            loop {
+                let result = match self.get_object_entry_ref::<T>() {
+                    Some(entry) => entry.get(),
+                    _ => None,
+                };
+                if let Some(item) = result {
+                    value = item;
+                    break;
+                }
+                fetched = cvar.wait(fetched).unwrap();
             }
-            fetched = cvar.wait(fetched).unwrap();
         }
+        from_value(deflatten(value)).unwrap()
     }
 
     fn try_take<T>(&self) -> Option<T>
     where
         for<'de> T: Serialize + Deserialize<'de> + 'static,
     {
-        match self.get_object_entry_mut::<T>() {
-            Some(mut ent) => ent.remove::<T>(),
-            None => None,
+        let value = match self.get_object_entry_mut::<T>() {
+            Some(mut entry) => entry.remove(),
+            _ => None,
+        };
+        match value {
+            Some(val) => from_value(deflatten(val)).ok(),
+            _ => None,
         }
     }
 
@@ -564,10 +589,16 @@ impl ObjectSpace for TreeObjectSpace {
     where
         for<'de> T: Serialize + Deserialize<'de> + 'static,
     {
-        match self.get_object_entry_mut::<T>() {
-            Some(mut entry) => Box::new(entry.remove_all::<T>().into_iter()),
-            None => Box::new(iter::empty::<T>()),
-        }
+        let val_iter = match self.get_object_entry_mut::<T>() {
+            Some(mut ent) => ent.remove_all(),
+            None => Vec::new(),
+        };
+
+        Box::new(
+            val_iter
+                .into_iter()
+                .filter_map(|item| from_value(deflatten(item)).ok()),
+        )
     }
 
     fn take<T>(&self) -> T
@@ -576,15 +607,22 @@ impl ObjectSpace for TreeObjectSpace {
     {
         self.add_entry(TypeId::of::<T>());
         let &(ref lock, ref cvar) = &*self.get_lock::<T>().unwrap().clone();
-        let mut fetched = lock.lock().unwrap();
-
-        loop {
-            let result = self.try_take::<T>();
-            if let Some(item) = result {
-                return item;
+        let value;
+        {
+            let mut fetched = lock.lock().unwrap();
+            loop {
+                let result = match self.get_object_entry_mut::<T>() {
+                    Some(mut entry) => entry.remove(),
+                    _ => None,
+                };
+                if let Some(item) = result {
+                    value = item;
+                    break;
+                }
+                fetched = cvar.wait(fetched).unwrap();
             }
-            fetched = cvar.wait(fetched).unwrap();
         }
+        from_value(deflatten(value)).unwrap()
     }
 }
 
@@ -597,8 +635,12 @@ macro_rules! object_range{
                     for<'de> T: Serialize + Deserialize<'de> + 'static,
                     R: RangeArgument<$ty> + Clone,
                 {
-                    match self.get_object_entry_ref::<T>() {
-                        Some(entry) => entry.get_range::<T, _>(field, condition),
+                    let value = match self.get_object_entry_ref::<T>() {
+                        Some(entry) => entry.get_range::<_>(field, condition),
+                        _ => None,
+                    };
+                    match value {
+                        Some(val) => from_value(deflatten(val)).ok(),
                         _ => None,
                     }
                 }
@@ -608,14 +650,12 @@ macro_rules! object_range{
                     for<'de> T: Deserialize<'de> + 'static,
                     R: RangeArgument<$ty> + Clone,
                 {
-                    match self.get_object_entry_ref::<T>() {
-                        Some(ent) => Box::new(
-                            ent.get_all_range::<T, _>(field, condition)
-                                .collect::<Vec<T>>()
-                                .into_iter(),
-                        ),
-                        None => Box::new(iter::empty::<T>()),
-                    }
+                    let val_iter: Vec<_> = match self.get_object_entry_ref::<T>() {
+                        Some(ent) => ent.get_all_range::<_>(field, condition).collect(),
+                        None => Vec::new(),
+                    };
+
+                    Box::new(val_iter.into_iter().filter_map(|item| from_value(deflatten(item)).ok()))
                 }
 
                 fn read_range<T, R>(&self, field: &str, condition: R) -> T
@@ -625,15 +665,22 @@ macro_rules! object_range{
                 {
                     self.add_entry(TypeId::of::<T>());
                     let &(ref lock, ref cvar) = &*self.get_lock::<T>().unwrap().clone();
-                    let mut fetched = lock.lock().unwrap();
-
-                    loop {
-                        let result = self.try_read_range::<T, _>(field, condition.clone());
-                        if let Some(item) = result {
-                            return item;
+                    let value;
+                    {
+                        let mut fetched = lock.lock().unwrap();
+                        loop {
+                            let result = match self.get_object_entry_ref::<T>() {
+                                Some(entry) => entry.get_range::<_>(field, condition.clone()),
+                                _ => None,
+                            };
+                            if let Some(item) = result {
+                                value = item;
+                                break;
+                            }
+                            fetched = cvar.wait(fetched).unwrap();
                         }
-                        fetched = cvar.wait(fetched).unwrap();
                     }
+                    from_value(deflatten(value)).unwrap()
                 }
 
                 fn try_take_range<T, R>(&self, field: &str, condition: R) -> Option<T>
@@ -641,8 +688,12 @@ macro_rules! object_range{
                     for<'de> T: Serialize + Deserialize<'de> + 'static,
                     R: RangeArgument<$ty> + Clone,
                 {
-                    match self.get_object_entry_mut::<T>() {
-                        Some(mut entry) => entry.remove_range::<T, _>(field, condition),
+                    let value = match self.get_object_entry_mut::<T>() {
+                        Some(mut entry) => entry.remove_range::<_>(field, condition),
+                        _ => None,
+                    };
+                    match value {
+                        Some(val) => from_value(deflatten(val)).ok(),
                         _ => None,
                     }
                 }
@@ -656,10 +707,16 @@ macro_rules! object_range{
                     for<'de> T: Deserialize<'de> + 'static,
                     R: RangeArgument<$ty> + Clone,
                 {
-                    match self.get_object_entry_mut::<T>() {
-                        Some(mut ent) => Box::new(ent.remove_all_range::<T, _>(field, condition).into_iter()),
-                        None => Box::new(iter::empty::<T>()),
-                    }
+                    let val_iter = match self.get_object_entry_mut::<T>() {
+                        Some(mut ent) => ent.remove_all_range::<_>(field, condition),
+                        None => Vec::new(),
+                    };
+
+                    Box::new(
+                        val_iter
+                            .into_iter()
+                            .filter_map(|item| from_value(deflatten(item)).ok())
+                    )
                 }
 
                 fn take_range<T, R>(&self, field: &str, condition: R) -> T
@@ -669,15 +726,22 @@ macro_rules! object_range{
                 {
                     self.add_entry(TypeId::of::<T>());
                     let &(ref lock, ref cvar) = &*self.get_lock::<T>().unwrap().clone();
-                    let mut fetched = lock.lock().unwrap();
-
-                    loop {
-                        let result = self.try_take_range::<T, _>(field, condition.clone());
-                        if let Some(item) = result {
-                            return item;
+                    let value;
+                    {
+                        let mut fetched = lock.lock().unwrap();
+                        loop {
+                            let result = match self.get_object_entry_mut::<T>() {
+                                Some(mut entry) => entry.remove_range::<_>(field, condition.clone()),
+                                _ => None,
+                            };
+                            if let Some(item) = result {
+                                value = item;
+                                break;
+                            }
+                            fetched = cvar.wait(fetched).unwrap();
                         }
-                        fetched = cvar.wait(fetched).unwrap();
                     }
+                    from_value(deflatten(value)).unwrap()
                 }
             }
         )*
@@ -692,8 +756,12 @@ macro_rules! object_key{
                 where
                     for<'de> T: Serialize + Deserialize<'de> + 'static,
                 {
-                    match self.get_object_entry_ref::<T>() {
-                        Some(entry) => entry.get_key::<T>(field, condition),
+                    let value = match self.get_object_entry_ref::<T>() {
+                        Some(entry) => entry.get_key(field, condition),
+                        _ => None,
+                    };
+                    match value {
+                        Some(val) => from_value(deflatten(val)).ok(),
                         _ => None,
                     }
                 }
@@ -702,10 +770,12 @@ macro_rules! object_key{
                 where
                     for<'de> T: Deserialize<'de> + 'static,
                 {
-                    match self.get_object_entry_ref::<T>() {
-                        Some(ent) => Box::new(ent.get_all_key::<T>(field, condition).collect::<Vec<T>>().into_iter()),
-                        None => Box::new(iter::empty::<T>()),
-                    }
+                    let val_iter: Vec<_> = match self.get_object_entry_ref::<T>() {
+                        Some(ent) => ent.get_all_key(field, condition).collect(),
+                        None => Vec::new(),
+                    };
+
+                    Box::new(val_iter.into_iter().filter_map(|item| from_value(deflatten(item)).ok()))
                 }
 
                 fn read_key<T>(&self, field: &str, condition: &$ty) -> T
@@ -714,23 +784,34 @@ macro_rules! object_key{
                 {
                     self.add_entry(TypeId::of::<T>());
                     let &(ref lock, ref cvar) = &*self.get_lock::<T>().unwrap().clone();
-                    let mut fetched = lock.lock().unwrap();
-
-                    loop {
-                        let result = self.try_read_key::<T>(field, condition);
-                        if let Some(item) = result {
-                            return item;
+                    let value;
+                    {
+                        let mut fetched = lock.lock().unwrap();
+                        loop {
+                            let result = match self.get_object_entry_ref::<T>() {
+                                Some(entry) => entry.get_key(field, condition),
+                                _ => None,
+                            };
+                            if let Some(item) = result {
+                                value = item;
+                                break;
+                            }
+                            fetched = cvar.wait(fetched).unwrap();
                         }
-                        fetched = cvar.wait(fetched).unwrap();
                     }
+                    from_value(deflatten(value)).unwrap()
                 }
 
                 fn try_take_key<T>(&self, field: &str, condition: &$ty) -> Option<T>
                 where
                     for<'de> T: Serialize + Deserialize<'de> + 'static,
                 {
-                    match self.get_object_entry_mut::<T>() {
-                        Some(mut entry) => entry.remove_key::<T>(field, condition),
+                    let value = match self.get_object_entry_mut::<T>() {
+                        Some(mut entry) => entry.remove_key(field, condition),
+                        _ => None,
+                    };
+                    match value {
+                        Some(val) => from_value(deflatten(val)).ok(),
                         _ => None,
                     }
                 }
@@ -743,10 +824,16 @@ macro_rules! object_key{
                 where
                     for<'de> T: Deserialize<'de> + 'static,
                 {
-                    match self.get_object_entry_mut::<T>() {
-                        Some(mut ent) => Box::new(ent.remove_all_key::<T>(field, condition).into_iter()),
-                        None => Box::new(iter::empty::<T>()),
-                    }
+                    let val_iter = match self.get_object_entry_mut::<T>() {
+                        Some(mut ent) => ent.remove_all_key(field, condition),
+                        None => Vec::new(),
+                    };
+
+                    Box::new(
+                        val_iter
+                            .into_iter()
+                            .filter_map(|item| from_value(deflatten(item)).ok())
+                    )
                 }
 
                 fn take_key<T>(&self, field: &str, condition: &$ty) -> T
@@ -755,15 +842,22 @@ macro_rules! object_key{
                 {
                     self.add_entry(TypeId::of::<T>());
                     let &(ref lock, ref cvar) = &*self.get_lock::<T>().unwrap().clone();
-                    let mut fetched = lock.lock().unwrap();
-
-                    loop {
-                        let result = self.try_take_key::<T>(field, condition);
-                        if let Some(item) = result {
-                            return item;
+                    let value;
+                    {
+                        let mut fetched = lock.lock().unwrap();
+                        loop {
+                            let result = match self.get_object_entry_mut::<T>() {
+                                Some(mut entry) => entry.remove_key(field, condition),
+                                _ => None,
+                            };
+                            if let Some(item) = result {
+                                value = item;
+                                break;
+                            }
+                            fetched = cvar.wait(fetched).unwrap();
                         }
-                        fetched = cvar.wait(fetched).unwrap();
                     }
+                    from_value(deflatten(value)).unwrap()
                 }
             }
         )*

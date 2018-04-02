@@ -10,7 +10,7 @@ use std::sync::Arc;
 use std::thread;
 
 use image::{ImageBuffer, Luma};
-use object_space::{ObjectSpace, ObjectSpaceKey, ObjectSpaceRange, TreeObjectSpace};
+use object_space::{ObjectSpace, ObjectSpaceKey, TreeObjectSpace};
 
 fn main() {
     let mut args = env::args();
@@ -41,8 +41,8 @@ fn run(dim: u32, iter_count: i32, thread_count: i32) {
         });
     }
 
-    let chunk_size = 128;
-    let mut task_count = dim / chunk_size;
+    let mut task_count = thread_count as u32;
+    let chunk_size = dim / task_count;
     let mut markers: Vec<_> = (0..task_count).map(|i| chunk_size * i).collect();
     if dim % chunk_size != 0 {
         task_count += 1;
@@ -75,7 +75,6 @@ fn run(dim: u32, iter_count: i32, thread_count: i32) {
         let color = Luma { data: [brightness] };
         buffer.put_pixel(pixel.col, pixel.row, color)
     });
-
     buffer.save("mandelbrot.png").unwrap();
 }
 

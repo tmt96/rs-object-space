@@ -1,27 +1,25 @@
-use std::iter::empty;
-use std::collections::{BTreeMap, HashMap};
-use std::sync::Arc;
 use std::borrow::Borrow;
-use std::iter::IntoIterator;
 use std::collections::range::RangeArgument;
+use std::collections::{BTreeMap, HashMap};
+use std::iter::IntoIterator;
+use std::iter::empty;
+use std::sync::Arc;
 
-use serde_json::value::{from_value, to_value, Value};
-use serde_json::map::Map;
-use serde_json::Number;
-use serde::ser::Serialize;
-use serde::de::Deserialize;
 use ordered_float::NotNaN;
+use serde_json::Number;
+use serde_json::map::Map;
+use serde_json::value::Value;
 
-mod range_entry;
-mod helpers;
 mod exact_key_entry;
+pub mod helpers;
+mod range_entry;
 
-use self::helpers::{deflatten, flatten, get_all_prims_from_map, get_primitive_from_map,
-                    get_primitive_key, get_primitive_range, remove_all_prims_key,
-                    remove_all_prims_range, remove_object, remove_primitive_from_map,
-                    remove_primitive_key, remove_primitive_range, remove_value_arc};
-pub use entry::range_entry::RangeEntry;
+use self::helpers::{get_all_prims_from_map, get_primitive_from_map, get_primitive_key,
+                    get_primitive_range, remove_all_prims_key, remove_all_prims_range,
+                    remove_object, remove_primitive_from_map, remove_primitive_key,
+                    remove_primitive_range, remove_value_arc};
 pub use entry::exact_key_entry::ExactKeyEntry;
+pub use entry::range_entry::RangeEntry;
 
 pub enum TreeSpaceEntry {
     FloatLeaf(BTreeMap<NotNaN<f64>, Vec<Arc<Value>>>),
@@ -38,84 +36,56 @@ impl TreeSpaceEntry {
         TreeSpaceEntry::Null
     }
 
-    pub fn add<T>(&mut self, obj: T)
-    where
-        T: Serialize,
-    {
-        match to_value(obj) {
-            Ok(value) => {
-                let flattened_val = flatten(value);
-                match flattened_val.clone() {
-                    Value::Number(num) => self.add_value_by_num(num, Arc::new(flattened_val)),
-                    Value::Bool(boolean) => {
-                        self.add_value_by_bool(boolean, Arc::new(flattened_val))
-                    }
-                    Value::String(string) => {
-                        self.add_value_by_string(string, Arc::new(flattened_val))
-                    }
-                    Value::Array(vec) => self.add_value_by_array(vec, Arc::new(flattened_val)),
-                    Value::Object(map) => self.add_value_by_object(map, Arc::new(flattened_val)),
-                    _ => (),
-                }
-            }
-            Err(e) => panic!("struct not serializable: {:?}", e),
+    pub fn add(&mut self, obj: Value) {
+        match obj.clone() {
+            Value::Number(num) => self.add_value_by_num(num, Arc::new(obj)),
+            Value::Bool(boolean) => self.add_value_by_bool(boolean, Arc::new(obj)),
+            Value::String(string) => self.add_value_by_string(string, Arc::new(obj)),
+            Value::Array(vec) => self.add_value_by_array(vec, Arc::new(obj)),
+            Value::Object(map) => self.add_value_by_object(map, Arc::new(obj)),
+            _ => (),
         }
     }
 
-    pub fn get<T>(&self) -> Option<T>
-    where
-        for<'de> T: Deserialize<'de>,
-    {
+    pub fn get(&self) -> Option<Value> {
         match self.get_helper() {
             Some(arc) => {
                 let val: &Value = arc.borrow();
-                from_value(deflatten(val.clone())).ok()
+                Some(val.clone())
             }
             None => None,
         }
     }
 
-    pub fn get_all<'a, T>(&'a self) -> Box<Iterator<Item = T> + 'a>
-    where
-        for<'de> T: Deserialize<'de> + 'static,
-    {
+    pub fn get_all<'a>(&'a self) -> Box<Iterator<Item = Value> + 'a> {
         match *self {
             TreeSpaceEntry::Null => Box::new(empty()),
             TreeSpaceEntry::BoolLeaf(ref bool_map) => get_all_prims_from_map(bool_map),
             TreeSpaceEntry::IntLeaf(ref int_map) => get_all_prims_from_map(int_map),
             TreeSpaceEntry::FloatLeaf(ref float_map) => get_all_prims_from_map(float_map),
             TreeSpaceEntry::StringLeaf(ref string_map) => get_all_prims_from_map(string_map),
-            TreeSpaceEntry::VecLeaf(ref vec) => Box::new(vec.iter().filter_map(|item| {
+            TreeSpaceEntry::VecLeaf(ref vec) => Box::new(vec.iter().map(|item| {
                 let val: &Value = item.borrow();
-                from_value(deflatten(val.clone())).ok()
+                val.clone()
             })),
             TreeSpaceEntry::Branch(ref object_field_map) => {
                 if let Some((_, value)) = object_field_map.iter().next() {
-                    return value.get_all::<T>();
+                    return value.get_all();
                 }
                 Box::new(empty())
             }
         }
     }
 
-    pub fn remove<T>(&mut self) -> Option<T>
-    where
-        for<'de> T: Deserialize<'de>,
-    {
+    pub fn remove(&mut self) -> Option<Value> {
         match self.remove_helper() {
-            Some(arc) => match Arc::try_unwrap(arc) {
-                Ok(value) => from_value(deflatten(value)).ok(),
-                Err(_) => None,
-            },
+            Some(arc) => Arc::try_unwrap(arc).ok(),
             None => None,
         }
     }
 
-    pub fn remove_all<'a, T>(&'a mut self) -> Vec<T>
-    where
-        for<'de> T: Deserialize<'de> + 'static,
-    {
-        let result = self.get_all::<T>().collect();
+    pub fn remove_all<'a>(&'a mut self) -> Vec<Value> {
+        let result = self.get_all().collect();
         match *self {
             TreeSpaceEntry::BoolLeaf(ref mut bool_map) => *bool_map = BTreeMap::new(),
             TreeSpaceEntry::IntLeaf(ref mut int_map) => *int_map = BTreeMap::new(),
@@ -189,21 +159,6 @@ impl TreeSpaceEntry {
                 None => panic!("No such field found!"),
             },
             _ => panic!("Not an string type or a struct holding an string"),
-        }
-    }
-
-    fn get_bool_range_helper<R>(&self, field: &str, condition: R) -> Option<Arc<Value>>
-    where
-        R: RangeArgument<bool>,
-    {
-        match *self {
-            TreeSpaceEntry::Null => None,
-            TreeSpaceEntry::BoolLeaf(ref bool_map) => get_primitive_range(bool_map, condition),
-            TreeSpaceEntry::Branch(ref field_map) => match field_map.get(field) {
-                Some(entry) => entry.get_bool_range_helper("", condition),
-                None => panic!("No such field found!"),
-            },
-            _ => panic!("Not an bool type or a struct holding an bool"),
         }
     }
 
@@ -343,33 +298,6 @@ impl TreeSpaceEntry {
                 }
             }
             _ => panic!("Not an string type or a struct holding an string"),
-        }
-    }
-
-    fn remove_bool_range<R>(&mut self, field: &str, condition: R) -> Option<Arc<Value>>
-    where
-        R: RangeArgument<bool>,
-    {
-        match *self {
-            TreeSpaceEntry::Null => None,
-            TreeSpaceEntry::BoolLeaf(ref mut bool_map) => {
-                remove_primitive_range(bool_map, condition)
-            }
-            TreeSpaceEntry::Branch(ref mut object_field_map) => {
-                let arc = match object_field_map.get_mut(field) {
-                    None => panic!("Field {} does not exist", field),
-                    Some(entry) => entry.remove_bool_range(field, condition),
-                };
-
-                match arc {
-                    Some(arc) => {
-                        remove_value_arc(object_field_map, &arc);
-                        Some(arc)
-                    }
-                    None => None,
-                }
-            }
-            _ => panic!("Not an int type or a struct holding an bool"),
         }
     }
 
@@ -528,30 +456,6 @@ impl TreeSpaceEntry {
                 arc_list
             }
             _ => panic!("Not an string type or a struct holding an string"),
-        }
-    }
-
-    fn remove_all_bool_range<R>(&mut self, field: &str, condition: R) -> Vec<Arc<Value>>
-    where
-        R: RangeArgument<bool>,
-    {
-        match *self {
-            TreeSpaceEntry::Null => Vec::new(),
-            TreeSpaceEntry::BoolLeaf(ref mut bool_map) => {
-                remove_all_prims_range(bool_map, condition)
-            }
-            TreeSpaceEntry::Branch(ref mut field_map) => {
-                let arc_list = match field_map.get_mut(field) {
-                    None => panic!("Field {} does not exist", field),
-                    Some(entry) => entry.remove_all_bool_range(field, condition),
-                };
-
-                for arc in arc_list.iter() {
-                    remove_value_arc(field_map, arc);
-                }
-                arc_list
-            }
-            _ => panic!("Not an bool type or a struct holding an bool"),
         }
     }
 

@@ -1,14 +1,13 @@
-use std::collections::{BTreeMap, HashMap};
-use std::sync::Arc;
 use std::borrow::Borrow;
 use std::cmp::Ord;
-use std::iter::{empty, IntoIterator};
 use std::collections::range::RangeArgument;
+use std::collections::{BTreeMap, HashMap};
+use std::iter::{empty, IntoIterator};
+use std::sync::Arc;
 
-use serde_json::value::{from_value, Value};
-use serde_json::map::Map;
-use serde::de::Deserialize;
 use ordered_float::NotNaN;
+use serde_json::map::Map;
+use serde_json::value::Value;
 
 use entry::TreeSpaceEntry;
 
@@ -49,52 +48,47 @@ where
     }
 }
 
-pub fn get_all_prims_from_map<'a, T, U>(
+pub fn get_all_prims_from_map<'a, U>(
     map: &'a BTreeMap<U, Vec<Arc<Value>>>,
-) -> Box<Iterator<Item = T> + 'a>
-where
-    for<'de> T: Deserialize<'de> + 'static,
-{
+) -> Box<Iterator<Item = Value> + 'a> {
     let iter = map.iter().flat_map(|(_, vec)| {
-        vec.iter().filter_map(|item| {
+        vec.iter().map(|item| {
             let val: &Value = item.borrow();
-            from_value(deflatten(val.clone())).ok()
+            val.clone()
         })
     });
     Box::new(iter)
 }
 
-pub fn get_all_prims_range<'a, T, R, U>(
+pub fn get_all_prims_range<'a, R, U>(
     map: &'a BTreeMap<U, Vec<Arc<Value>>>,
     condition: R,
-) -> Box<Iterator<Item = T> + 'a>
+) -> Box<Iterator<Item = Value> + 'a>
 where
-    for<'de> T: Deserialize<'de> + 'static,
     R: RangeArgument<U>,
     U: Ord,
 {
     let iter = map.range(condition).flat_map(|(_, vec)| {
         vec.iter().filter_map(|item| {
             let val: &Value = item.borrow();
-            from_value(deflatten(val.clone())).ok()
+            Some(val.clone())
         })
     });
     Box::new(iter)
 }
 
-pub fn get_all_prims_key<'a, T, U>(
+pub fn get_all_prims_key<'a, U>(
     map: &'a BTreeMap<U, Vec<Arc<Value>>>,
     key: &U,
-) -> Box<Iterator<Item = T> + 'a>
+) -> Box<Iterator<Item = Value> + 'a>
 where
-    for<'de> T: Deserialize<'de> + 'static,
     U: Ord,
 {
     match map.get(key) {
         None => Box::new(empty()),
         Some(vec) => Box::new(vec.iter().filter_map(|item| {
             let val: &Value = item.borrow();
-            from_value(deflatten(val.clone())).ok()
+            Some(val.clone())
         })),
     }
 }

@@ -1,8 +1,8 @@
+use object_space::{ObjectSpace, ObjectSpaceKey, ObjectSpaceRange};
+use serde::{Deserialize, Serialize};
+use std::collections::range::RangeArgument;
 use std::thread;
 use std::thread::JoinHandle;
-use serde::{Deserialize, Serialize};
-use object_space::{ObjectSpace, ObjectSpaceKey, ObjectSpaceRange};
-use std::collections::range::RangeArgument;
 
 pub trait Agent {
     type Space: ObjectSpace;
@@ -21,7 +21,7 @@ pub trait Agent {
     /// Add a struct to the object space
     fn write<T>(&self, obj: T)
     where
-        for<'de> T: Serialize + Deserialize<'de> + 'static,
+        for<'de> T: Serialize + Deserialize<'de> + Send + 'static,
     {
         self.get_space().write(obj)
     }
@@ -164,7 +164,7 @@ pub trait AgentRange<U> {
     /// Add a struct to the object space
     fn write<T>(&self, obj: T)
     where
-        for<'de> T: Serialize + Deserialize<'de> + 'static,
+        for<'de> T: Serialize + Deserialize<'de> + Send + 'static,
     {
         self.get_space().write(obj)
     }
@@ -303,7 +303,7 @@ pub trait AgentKey<U> {
     /// Add a struct to the object space
     fn write<T>(&self, obj: T)
     where
-        for<'de> T: Serialize + Deserialize<'de> + 'static,
+        for<'de> T: Serialize + Deserialize<'de> + Send + 'static,
     {
         self.get_space().write(obj)
     }

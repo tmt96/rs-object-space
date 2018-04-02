@@ -1,57 +1,53 @@
+use std::borrow::Borrow;
+use std::collections::range::RangeArgument;
+use std::iter::IntoIterator;
 use std::iter::empty;
 use std::sync::Arc;
-use std::borrow::Borrow;
-use std::iter::IntoIterator;
-use std::collections::range::RangeArgument;
 
-use serde_json::value::{from_value, Value};
-use serde::ser::Serialize;
-use serde::de::Deserialize;
 use ordered_float::NotNaN;
+use serde_json::value::Value;
 
-use entry::helpers::{deflatten, get_all_prims_range};
 use entry::TreeSpaceEntry;
+use entry::helpers::get_all_prims_range;
 
 pub trait RangeEntry<U> {
-    fn get_range<T, R>(&self, field: &str, condition: R) -> Option<T>
+    fn get_range<R>(&self, field: &str, condition: R) -> Option<Value>
     where
-        for<'de> T: Serialize + Deserialize<'de>,
         R: RangeArgument<U>;
 
-    fn get_all_range<'a, T, R>(&'a self, field: &str, condition: R) -> Box<Iterator<Item = T> + 'a>
+    fn get_all_range<'a, R>(
+        &'a self,
+        field: &str,
+        condition: R,
+    ) -> Box<Iterator<Item = Value> + 'a>
     where
-        for<'de> T: Deserialize<'de> + 'static,
         R: RangeArgument<U>;
 
-    fn remove_range<T, R>(&mut self, field: &str, condition: R) -> Option<T>
+    fn remove_range<R>(&mut self, field: &str, condition: R) -> Option<Value>
     where
-        for<'de> T: Serialize + Deserialize<'de>,
         R: RangeArgument<U>;
 
-    fn remove_all_range<'a, T, R>(&'a mut self, field: &str, condition: R) -> Vec<T>
+    fn remove_all_range<'a, R>(&'a mut self, field: &str, condition: R) -> Vec<Value>
     where
-        for<'de> T: Deserialize<'de> + 'static,
         R: RangeArgument<U>;
 }
 
 impl RangeEntry<i64> for TreeSpaceEntry {
-    fn get_range<T, R>(&self, field: &str, condition: R) -> Option<T>
+    fn get_range<R>(&self, field: &str, condition: R) -> Option<Value>
     where
-        for<'de> T: Serialize + Deserialize<'de>,
         R: RangeArgument<i64>,
     {
         match self.get_int_range_helper(field, condition) {
             Some(arc) => {
                 let val: &Value = arc.borrow();
-                from_value(deflatten(val.clone())).ok()
+                Some(val.clone())
             }
             None => None,
         }
     }
 
-    fn get_all_range<'a, T, R>(&'a self, field: &str, condition: R) -> Box<Iterator<Item = T> + 'a>
+    fn get_all_range<'a, R>(&'a self, field: &str, condition: R) -> Box<Iterator<Item = Value> + 'a>
     where
-        for<'de> T: Deserialize<'de> + 'static,
         R: RangeArgument<i64>,
     {
         match *self {
@@ -65,53 +61,43 @@ impl RangeEntry<i64> for TreeSpaceEntry {
         }
     }
 
-    fn remove_range<T, R>(&mut self, field: &str, condition: R) -> Option<T>
+    fn remove_range<R>(&mut self, field: &str, condition: R) -> Option<Value>
     where
-        for<'de> T: Serialize + Deserialize<'de>,
         R: RangeArgument<i64>,
     {
         match self.remove_int_range(field, condition) {
-            Some(arc) => match Arc::try_unwrap(arc) {
-                Ok(value) => from_value(deflatten(value)).ok(),
-                Err(_) => None,
-            },
+            Some(arc) => Arc::try_unwrap(arc).ok(),
             None => None,
         }
     }
 
-    fn remove_all_range<'a, T, R>(&'a mut self, field: &str, condition: R) -> Vec<T>
+    fn remove_all_range<'a, R>(&'a mut self, field: &str, condition: R) -> Vec<Value>
     where
-        for<'de> T: Deserialize<'de> + 'static,
         R: RangeArgument<i64>,
     {
         self.remove_all_int_range(field, condition)
             .into_iter()
-            .filter_map(|arc| match Arc::try_unwrap(arc) {
-                Ok(value) => from_value(deflatten(value)).ok(),
-                Err(_) => None,
-            })
+            .filter_map(|arc| Arc::try_unwrap(arc).ok())
             .collect()
     }
 }
 
 impl RangeEntry<String> for TreeSpaceEntry {
-    fn get_range<T, R>(&self, field: &str, condition: R) -> Option<T>
+    fn get_range<R>(&self, field: &str, condition: R) -> Option<Value>
     where
-        for<'de> T: Serialize + Deserialize<'de>,
         R: RangeArgument<String>,
     {
         match self.get_string_range_helper(field, condition) {
             Some(arc) => {
                 let val: &Value = arc.borrow();
-                from_value(deflatten(val.clone())).ok()
+                Some(val.clone())
             }
             None => None,
         }
     }
 
-    fn get_all_range<'a, T, R>(&'a self, field: &str, condition: R) -> Box<Iterator<Item = T> + 'a>
+    fn get_all_range<'a, R>(&'a self, field: &str, condition: R) -> Box<Iterator<Item = Value> + 'a>
     where
-        for<'de> T: Deserialize<'de> + 'static,
         R: RangeArgument<String>,
     {
         match *self {
@@ -127,113 +113,43 @@ impl RangeEntry<String> for TreeSpaceEntry {
         }
     }
 
-    fn remove_range<T, R>(&mut self, field: &str, condition: R) -> Option<T>
+    fn remove_range<R>(&mut self, field: &str, condition: R) -> Option<Value>
     where
-        for<'de> T: Serialize + Deserialize<'de>,
         R: RangeArgument<String>,
     {
         match self.remove_string_range(field, condition) {
-            Some(arc) => match Arc::try_unwrap(arc) {
-                Ok(value) => from_value(deflatten(value)).ok(),
-                Err(_) => None,
-            },
+            Some(arc) => Arc::try_unwrap(arc).ok(),
             None => None,
         }
     }
 
-    fn remove_all_range<'a, T, R>(&'a mut self, field: &str, condition: R) -> Vec<T>
+    fn remove_all_range<'a, R>(&'a mut self, field: &str, condition: R) -> Vec<Value>
     where
-        for<'de> T: Deserialize<'de> + 'static,
         R: RangeArgument<String>,
     {
         self.remove_all_string_range(field, condition)
             .into_iter()
-            .filter_map(|arc| match Arc::try_unwrap(arc) {
-                Ok(value) => from_value(deflatten(value)).ok(),
-                Err(_) => None,
-            })
-            .collect()
-    }
-}
-
-impl RangeEntry<bool> for TreeSpaceEntry {
-    fn get_range<T, R>(&self, field: &str, condition: R) -> Option<T>
-    where
-        for<'de> T: Serialize + Deserialize<'de>,
-        R: RangeArgument<bool>,
-    {
-        match self.get_bool_range_helper(field, condition) {
-            Some(arc) => {
-                let val: &Value = arc.borrow();
-                from_value(deflatten(val.clone())).ok()
-            }
-            None => None,
-        }
-    }
-
-    fn get_all_range<'a, T, R>(&'a self, field: &str, condition: R) -> Box<Iterator<Item = T> + 'a>
-    where
-        for<'de> T: Deserialize<'de> + 'static,
-        R: RangeArgument<bool>,
-    {
-        match *self {
-            TreeSpaceEntry::Null => Box::new(empty()),
-            TreeSpaceEntry::BoolLeaf(ref bool_map) => get_all_prims_range(bool_map, condition),
-            TreeSpaceEntry::Branch(ref field_map) => match field_map.get(field) {
-                Some(entry) => entry.get_all_range("", condition),
-                None => panic!("No such field found!"),
-            },
-            _ => panic!("Not an int type or a struct holding an int"),
-        }
-    }
-
-    fn remove_range<T, R>(&mut self, field: &str, condition: R) -> Option<T>
-    where
-        for<'de> T: Serialize + Deserialize<'de>,
-        R: RangeArgument<bool>,
-    {
-        match self.remove_bool_range(field, condition) {
-            Some(arc) => match Arc::try_unwrap(arc) {
-                Ok(value) => from_value(deflatten(value)).ok(),
-                Err(_) => None,
-            },
-            None => None,
-        }
-    }
-
-    fn remove_all_range<'a, T, R>(&'a mut self, field: &str, condition: R) -> Vec<T>
-    where
-        for<'de> T: Deserialize<'de> + 'static,
-        R: RangeArgument<bool>,
-    {
-        self.remove_all_bool_range(field, condition)
-            .into_iter()
-            .filter_map(|arc| match Arc::try_unwrap(arc) {
-                Ok(value) => from_value(deflatten(value)).ok(),
-                Err(_) => None,
-            })
+            .filter_map(|arc| Arc::try_unwrap(arc).ok())
             .collect()
     }
 }
 
 impl RangeEntry<NotNaN<f64>> for TreeSpaceEntry {
-    fn get_range<T, R>(&self, field: &str, condition: R) -> Option<T>
+    fn get_range<R>(&self, field: &str, condition: R) -> Option<Value>
     where
-        for<'de> T: Serialize + Deserialize<'de>,
         R: RangeArgument<NotNaN<f64>>,
     {
         match self.get_float_range_helper(field, condition) {
             Some(arc) => {
                 let val: &Value = arc.borrow();
-                from_value(deflatten(val.clone())).ok()
+                Some(val.clone())
             }
             None => None,
         }
     }
 
-    fn get_all_range<'a, T, R>(&'a self, field: &str, condition: R) -> Box<Iterator<Item = T> + 'a>
+    fn get_all_range<'a, R>(&'a self, field: &str, condition: R) -> Box<Iterator<Item = Value> + 'a>
     where
-        for<'de> T: Deserialize<'de> + 'static,
         R: RangeArgument<NotNaN<f64>>,
     {
         match *self {
@@ -247,31 +163,23 @@ impl RangeEntry<NotNaN<f64>> for TreeSpaceEntry {
         }
     }
 
-    fn remove_range<T, R>(&mut self, field: &str, condition: R) -> Option<T>
+    fn remove_range<R>(&mut self, field: &str, condition: R) -> Option<Value>
     where
-        for<'de> T: Serialize + Deserialize<'de>,
         R: RangeArgument<NotNaN<f64>>,
     {
         match self.remove_float_range(field, condition) {
-            Some(arc) => match Arc::try_unwrap(arc) {
-                Ok(value) => from_value(deflatten(value)).ok(),
-                Err(_) => None,
-            },
+            Some(arc) => Arc::try_unwrap(arc).ok(),
             None => None,
         }
     }
 
-    fn remove_all_range<'a, T, R>(&'a mut self, field: &str, condition: R) -> Vec<T>
+    fn remove_all_range<'a, R>(&'a mut self, field: &str, condition: R) -> Vec<Value>
     where
-        for<'de> T: Deserialize<'de> + 'static,
         R: RangeArgument<NotNaN<f64>>,
     {
         self.remove_all_float_range(field, condition)
             .into_iter()
-            .filter_map(|arc| match Arc::try_unwrap(arc) {
-                Ok(value) => from_value(deflatten(value)).ok(),
-                Err(_) => None,
-            })
+            .filter_map(|arc| Arc::try_unwrap(arc).ok())
             .collect()
     }
 }
