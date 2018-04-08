@@ -1,7 +1,6 @@
 use std::any::TypeId;
 use std::collections::range::RangeArgument;
 use std::sync::{Arc, Condvar, Mutex};
-use std::thread;
 
 use chashmap::{CHashMap, ReadGuard, WriteGuard};
 use ordered_float::NotNaN;
