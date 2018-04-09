@@ -1,20 +1,20 @@
 use std::borrow::Borrow;
-use std::collections::range::RangeArgument;
 use std::iter::IntoIterator;
 use std::iter::empty;
+use std::ops::RangeBounds;
 use std::sync::Arc;
 
 use ordered_float::NotNaN;
 use serde_json::value::Value;
 
 use entry::TreeSpaceEntry;
-use entry::helpers::{get_all_prims_range, get_primitive_range, remove_all_prims_range,
-                     remove_primitive_range, remove_value_arc};
+use entry::helpers::{convert_float_range, get_all_prims_range, get_primitive_range,
+                     remove_all_prims_range, remove_primitive_range, remove_value_arc};
 
 pub trait RangeEntry<U> {
     fn get_range<R>(&self, field: &str, condition: R) -> Option<Value>
     where
-        R: RangeArgument<U>;
+        R: RangeBounds<U>;
 
     fn get_all_range<'a, R>(
         &'a self,
@@ -22,15 +22,15 @@ pub trait RangeEntry<U> {
         condition: R,
     ) -> Box<Iterator<Item = Value> + 'a>
     where
-        R: RangeArgument<U>;
+        R: RangeBounds<U>;
 
     fn remove_range<R>(&mut self, field: &str, condition: R) -> Option<Value>
     where
-        R: RangeArgument<U>;
+        R: RangeBounds<U>;
 
     fn remove_all_range<'a, R>(&'a mut self, field: &str, condition: R) -> Vec<Value>
     where
-        R: RangeArgument<U>;
+        R: RangeBounds<U>;
 }
 
 macro_rules! impl_range_entry {
@@ -39,7 +39,7 @@ macro_rules! impl_range_entry {
             impl RangeEntry<$ty> for TreeSpaceEntry {
                 fn get_range<R>(&self, field: &str, condition: R) -> Option<Value>
                 where
-                    R: RangeArgument<$ty>,
+                    R: RangeBounds<$ty>,
                 {
                     match self.get_range_helper(field, condition) {
                         Some(arc) => {
@@ -52,14 +52,14 @@ macro_rules! impl_range_entry {
 
                 fn get_all_range<'a, R>(&'a self, field: &str, condition: R) -> Box<Iterator<Item = Value> + 'a>
                 where
-                    R: RangeArgument<$ty>,
+                    R: RangeBounds<$ty>,
                 {
                     self.get_all_range_helper(field, condition)
                 }
 
                 fn remove_range<R>(&mut self, field: &str, condition: R) -> Option<Value>
                 where
-                    R: RangeArgument<$ty>,
+                    R: RangeBounds<$ty>,
                 {
                     match self.remove_range_helper(field, condition) {
                         Some(arc) => Arc::try_unwrap(arc).ok(),
@@ -69,7 +69,7 @@ macro_rules! impl_range_entry {
 
                 fn remove_all_range<'a, R>(&'a mut self, field: &str, condition: R) -> Vec<Value>
                 where
-                    R: RangeArgument<$ty>,
+                    R: RangeBounds<$ty>,
                 {
                     self.remove_all_range_helper(field, condition)
                         .into_iter()
@@ -81,12 +81,12 @@ macro_rules! impl_range_entry {
     };
 }
 
-impl_range_entry!{i64 String}
+impl_range_entry!{i64 String f64}
 
 trait RangeValueCollection<T> {
     fn get_range_helper<R>(&self, field: &str, condition: R) -> Option<Arc<Value>>
     where
-        R: RangeArgument<T>;
+        R: RangeBounds<T>;
 
     fn get_all_range_helper<'a, R>(
         &'a self,
@@ -94,15 +94,15 @@ trait RangeValueCollection<T> {
         condition: R,
     ) -> Box<Iterator<Item = Value> + 'a>
     where
-        R: RangeArgument<T>;
+        R: RangeBounds<T>;
 
     fn remove_range_helper<R>(&mut self, field: &str, condition: R) -> Option<Arc<Value>>
     where
-        R: RangeArgument<T>;
+        R: RangeBounds<T>;
 
     fn remove_all_range_helper<R>(&mut self, field: &str, condition: R) -> Vec<Arc<Value>>
     where
-        R: RangeArgument<T>;
+        R: RangeBounds<T>;
 }
 
 macro_rules! impl_range_val_collection {
@@ -112,7 +112,7 @@ macro_rules! impl_range_val_collection {
 
                 fn get_range_helper<R>(&self, field: &str, condition: R) -> Option<Arc<Value>>
                 where
-                    R: RangeArgument<$ty>,
+                    R: RangeBounds<$ty>,
                 {
                     match *self {
                         TreeSpaceEntry::Null => None,
@@ -127,7 +127,7 @@ macro_rules! impl_range_val_collection {
 
                 fn get_all_range_helper<'a, R>(&'a self, field: &str, condition: R) -> Box<Iterator<Item = Value> + 'a>
                 where
-                    R: RangeArgument<$ty>,
+                    R: RangeBounds<$ty>,
                 {
                     match *self {
                         TreeSpaceEntry::Null => Box::new(empty()),
@@ -144,7 +144,7 @@ macro_rules! impl_range_val_collection {
 
                 fn remove_range_helper<R>(&mut self, field: &str, condition: R) -> Option<Arc<Value>>
                 where
-                    R: RangeArgument<$ty>,
+                    R: RangeBounds<$ty>,
                 {
                     match *self {
                         TreeSpaceEntry::Null => None,
@@ -169,7 +169,7 @@ macro_rules! impl_range_val_collection {
 
                 fn remove_all_range_helper<R>(&mut self, field: &str, condition: R) -> Vec<Arc<Value>>
                 where
-                    R: RangeArgument<$ty>,
+                    R: RangeBounds<$ty>,
                 {
                     match *self {
                         TreeSpaceEntry::Null => Vec::new(),
@@ -193,55 +193,39 @@ macro_rules! impl_range_val_collection {
     };
 }
 
-impl_range_val_collection!{[IntLeaf, i64] [StringLeaf, String]}
+impl_range_val_collection!{[IntLeaf, i64] [StringLeaf, String] [FloatLeaf, NotNaN<f64>]}
 
-impl RangeEntry<NotNaN<f64>> for TreeSpaceEntry {
-    fn get_range<R>(&self, field: &str, condition: R) -> Option<Value>
+impl RangeValueCollection<f64> for TreeSpaceEntry {
+    fn get_range_helper<R>(&self, field: &str, condition: R) -> Option<Arc<Value>>
     where
-        R: RangeArgument<NotNaN<f64>>,
+        R: RangeBounds<f64>,
     {
-        match self.get_float_range_helper(field, condition) {
-            Some(arc) => {
-                let val: &Value = arc.borrow();
-                Some(val.clone())
-            }
-            None => None,
-        }
+        self.get_range_helper(field, convert_float_range(condition))
     }
 
-    fn get_all_range<'a, R>(&'a self, field: &str, condition: R) -> Box<Iterator<Item = Value> + 'a>
+    fn get_all_range_helper<'a, R>(
+        &'a self,
+        field: &str,
+        condition: R,
+    ) -> Box<Iterator<Item = Value> + 'a>
     where
-        R: RangeArgument<NotNaN<f64>>,
+        R: RangeBounds<f64>,
     {
-        match *self {
-            TreeSpaceEntry::Null => Box::new(empty()),
-            TreeSpaceEntry::FloatLeaf(ref float_map) => get_all_prims_range(float_map, condition),
-            TreeSpaceEntry::Branch(ref field_map) => match field_map.get(field) {
-                Some(entry) => entry.get_all_range("", condition),
-                None => panic!("No such field found!"),
-            },
-            _ => panic!("Not an int type or a struct holding an int"),
-        }
+        self.get_all_range_helper(field, convert_float_range(condition))
     }
 
-    fn remove_range<R>(&mut self, field: &str, condition: R) -> Option<Value>
+    fn remove_range_helper<R>(&mut self, field: &str, condition: R) -> Option<Arc<Value>>
     where
-        R: RangeArgument<NotNaN<f64>>,
+        R: RangeBounds<f64>,
     {
-        match self.remove_float_range(field, condition) {
-            Some(arc) => Arc::try_unwrap(arc).ok(),
-            None => None,
-        }
+        self.remove_range_helper(field, convert_float_range(condition))
     }
 
-    fn remove_all_range<'a, R>(&'a mut self, field: &str, condition: R) -> Vec<Value>
+    fn remove_all_range_helper<R>(&mut self, field: &str, condition: R) -> Vec<Arc<Value>>
     where
-        R: RangeArgument<NotNaN<f64>>,
+        R: RangeBounds<f64>,
     {
-        self.remove_all_float_range(field, condition)
-            .into_iter()
-            .filter_map(|arc| Arc::try_unwrap(arc).ok())
-            .collect()
+        self.remove_all_range_helper(field, convert_float_range(condition))
     }
 }
 

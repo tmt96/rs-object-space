@@ -1,5 +1,4 @@
 use std::borrow::Borrow;
-use std::collections::range::RangeArgument;
 use std::collections::{BTreeMap, HashMap};
 use std::iter::IntoIterator;
 use std::iter::empty;
@@ -14,10 +13,8 @@ mod exact_key_entry;
 pub mod helpers;
 mod range_entry;
 
-use self::helpers::{get_all_prims_from_map, get_primitive_from_map, get_primitive_key,
-                    get_primitive_range, remove_all_prims_key, remove_all_prims_range,
-                    remove_object, remove_primitive_from_map, remove_primitive_key,
-                    remove_primitive_range, remove_value_arc};
+use self::helpers::{get_all_prims_from_map, get_primitive_from_map, remove_object,
+                    remove_primitive_from_map};
 pub use entry::exact_key_entry::ExactKeyEntry;
 pub use entry::range_entry::RangeEntry;
 
@@ -115,21 +112,6 @@ impl TreeSpaceEntry {
         }
     }
 
-    fn get_float_range_helper<R>(&self, field: &str, condition: R) -> Option<Arc<Value>>
-    where
-        R: RangeArgument<NotNaN<f64>>,
-    {
-        match *self {
-            TreeSpaceEntry::Null => None,
-            TreeSpaceEntry::FloatLeaf(ref float_map) => get_primitive_range(float_map, condition),
-            TreeSpaceEntry::Branch(ref field_map) => match field_map.get(field) {
-                Some(entry) => entry.get_float_range_helper("", condition),
-                None => panic!("No such field found!"),
-            },
-            _ => panic!("Not an float type or a struct holding an float"),
-        }
-    }
-
     fn remove_helper(&mut self) -> Option<Arc<Value>> {
         match *self {
             TreeSpaceEntry::Null => None,
@@ -139,57 +121,6 @@ impl TreeSpaceEntry {
             TreeSpaceEntry::StringLeaf(ref mut string_map) => remove_primitive_from_map(string_map),
             TreeSpaceEntry::VecLeaf(ref mut vec) => vec.pop(),
             TreeSpaceEntry::Branch(ref mut object_field_map) => remove_object(object_field_map),
-        }
-    }
-
-    fn remove_float_range<R>(&mut self, field: &str, condition: R) -> Option<Arc<Value>>
-    where
-        R: RangeArgument<NotNaN<f64>>,
-    {
-        match *self {
-            TreeSpaceEntry::Null => None,
-            TreeSpaceEntry::FloatLeaf(ref mut float_map) => {
-                remove_primitive_range(float_map, condition)
-            }
-            TreeSpaceEntry::Branch(ref mut object_field_map) => {
-                let arc = match object_field_map.get_mut(field) {
-                    None => panic!("Field {} does not exist", field),
-                    Some(entry) => entry.remove_float_range(field, condition),
-                };
-
-                match arc {
-                    Some(arc) => {
-                        remove_value_arc(object_field_map, &arc);
-                        Some(arc)
-                    }
-                    None => None,
-                }
-            }
-            _ => panic!("Not an float type or a struct holding an float"),
-        }
-    }
-
-    fn remove_all_float_range<R>(&mut self, field: &str, condition: R) -> Vec<Arc<Value>>
-    where
-        R: RangeArgument<NotNaN<f64>>,
-    {
-        match *self {
-            TreeSpaceEntry::Null => Vec::new(),
-            TreeSpaceEntry::FloatLeaf(ref mut float_map) => {
-                remove_all_prims_range(float_map, condition)
-            }
-            TreeSpaceEntry::Branch(ref mut field_map) => {
-                let arc_list = match field_map.get_mut(field) {
-                    None => panic!("Field {} does not exist", field),
-                    Some(entry) => entry.remove_all_float_range(field, condition),
-                };
-
-                for arc in arc_list.iter() {
-                    remove_value_arc(field_map, arc);
-                }
-                arc_list
-            }
-            _ => panic!("Not an float type or a struct holding an float"),
         }
     }
 

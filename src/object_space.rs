@@ -1,5 +1,5 @@
 use std::any::TypeId;
-use std::collections::range::RangeArgument;
+use std::ops::RangeBounds;
 use std::sync::{Arc, Condvar, Mutex};
 
 use chashmap::{CHashMap, ReadGuard, WriteGuard};
@@ -161,7 +161,7 @@ pub trait ObjectSpace {
 /// An extension of `ObjectSpace` supporting retrieving structs by range of a field.
 ///
 /// Given a type `T` with a field (might be nested) of type `U`,
-/// a path to a field of type `U` and a `RangeArgument<U>`,
+/// a path to a field of type `U` and a `RangeBounds<U>`,
 /// an `ObjectSpaceRange<U>` could retrieve structs of type `T`
 /// whose value of the specified field is within the given range.
 ///
@@ -195,7 +195,7 @@ pub trait ObjectSpaceRange<U>: ObjectSpace {
     fn try_read_range<T, R>(&self, field: &str, condition: R) -> Option<T>
     where
         for<'de> T: Serialize + Deserialize<'de> + 'static,
-        R: RangeArgument<U> + Clone;
+        R: RangeBounds<U> + Clone;
 
     /// Given a path to an element of the struct and a range of possible values,
     /// return copies of all structs whose specified element is within the range.
@@ -218,7 +218,7 @@ pub trait ObjectSpaceRange<U>: ObjectSpace {
     ) -> Box<Iterator<Item = T> + 'a>
     where
         for<'de> T: Deserialize<'de> + 'static,
-        R: RangeArgument<U> + Clone;
+        R: RangeBounds<U> + Clone;
 
     /// Given a path to an element of the struct and a range of possible values,
     /// return a copy of a struct whose specified element is within the range.
@@ -237,7 +237,7 @@ pub trait ObjectSpaceRange<U>: ObjectSpace {
     fn read_range<T, R>(&self, field: &str, condition: R) -> T
     where
         for<'de> T: Serialize + Deserialize<'de> + 'static,
-        R: RangeArgument<U> + Clone;
+        R: RangeBounds<U> + Clone;
 
     /// Given a path to an element of the struct and a range of possible values,
     /// remove and return a struct whose specified element is within the range.
@@ -258,7 +258,7 @@ pub trait ObjectSpaceRange<U>: ObjectSpace {
     fn try_take_range<T, R>(&self, field: &str, condition: R) -> Option<T>
     where
         for<'de> T: Serialize + Deserialize<'de> + 'static,
-        R: RangeArgument<U> + Clone;
+        R: RangeBounds<U> + Clone;
 
     /// Given a path to an element of the struct and a range of possible values,
     /// remove and return all structs whose specified element is within the range.
@@ -281,7 +281,7 @@ pub trait ObjectSpaceRange<U>: ObjectSpace {
     ) -> Box<Iterator<Item = T> + 'a>
     where
         for<'de> T: Deserialize<'de> + 'static,
-        R: RangeArgument<U> + Clone;
+        R: RangeBounds<U> + Clone;
 
     /// Given a path to an element of the struct and a range of possible values,
     /// remove and return a struct whose specified element is within the range.
@@ -301,7 +301,7 @@ pub trait ObjectSpaceRange<U>: ObjectSpace {
     fn take_range<T, R>(&self, field: &str, condition: R) -> T
     where
         for<'de> T: Serialize + Deserialize<'de> + 'static,
-        R: RangeArgument<U> + Clone;
+        R: RangeBounds<U> + Clone;
 }
 
 /// An extension of `ObjectSpace` supporting retrieving structs by value of a field.
@@ -632,7 +632,7 @@ macro_rules! object_range{
                 fn try_read_range<T, R>(&self, field: &str, condition: R) -> Option<T>
                 where
                     for<'de> T: Serialize + Deserialize<'de> + 'static,
-                    R: RangeArgument<$ty> + Clone,
+                    R: RangeBounds<$ty> + Clone,
                 {
                     let value = match self.get_object_entry_ref::<T>() {
                         Some(entry) => entry.get_range::<_>(field, condition),
@@ -647,7 +647,7 @@ macro_rules! object_range{
                 fn read_all_range<'a, T, R>(&'a self, field: &str, condition: R) -> Box<Iterator<Item = T> + 'a>
                 where
                     for<'de> T: Deserialize<'de> + 'static,
-                    R: RangeArgument<$ty> + Clone,
+                    R: RangeBounds<$ty> + Clone,
                 {
                     let val_iter: Vec<_> = match self.get_object_entry_ref::<T>() {
                         Some(ent) => ent.get_all_range::<_>(field, condition).collect(),
@@ -660,7 +660,7 @@ macro_rules! object_range{
                 fn read_range<T, R>(&self, field: &str, condition: R) -> T
                 where
                     for<'de> T: Serialize + Deserialize<'de> + 'static,
-                    R: RangeArgument<$ty> + Clone,
+                    R: RangeBounds<$ty> + Clone,
                 {
                     self.add_entry(TypeId::of::<T>());
                     let &(ref lock, ref cvar) = &*self.get_lock::<T>().unwrap().clone();
@@ -685,7 +685,7 @@ macro_rules! object_range{
                 fn try_take_range<T, R>(&self, field: &str, condition: R) -> Option<T>
                 where
                     for<'de> T: Serialize + Deserialize<'de> + 'static,
-                    R: RangeArgument<$ty> + Clone,
+                    R: RangeBounds<$ty> + Clone,
                 {
                     let value = match self.get_object_entry_mut::<T>() {
                         Some(mut entry) => entry.remove_range::<_>(field, condition),
@@ -704,7 +704,7 @@ macro_rules! object_range{
                 ) -> Box<Iterator<Item = T> + 'a>
                 where
                     for<'de> T: Deserialize<'de> + 'static,
-                    R: RangeArgument<$ty> + Clone,
+                    R: RangeBounds<$ty> + Clone,
                 {
                     let val_iter = match self.get_object_entry_mut::<T>() {
                         Some(mut ent) => ent.remove_all_range::<_>(field, condition),
@@ -721,7 +721,7 @@ macro_rules! object_range{
                 fn take_range<T, R>(&self, field: &str, condition: R) -> T
                 where
                     for<'de> T: Serialize + Deserialize<'de> + 'static,
-                    R: RangeArgument<$ty> + Clone,
+                    R: RangeBounds<$ty> + Clone,
                 {
                     self.add_entry(TypeId::of::<T>());
                     let &(ref lock, ref cvar) = &*self.get_lock::<T>().unwrap().clone();
@@ -863,7 +863,7 @@ macro_rules! object_key{
     };
 }
 
-object_range!{i64 String}
+object_range!{i64 String f64}
 object_key!{i64 String bool f64}
 
 mod tests {

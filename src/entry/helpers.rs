@@ -1,8 +1,9 @@
 use std::borrow::Borrow;
 use std::cmp::Ord;
-use std::collections::range::RangeArgument;
+use std::collections::Bound;
 use std::collections::{BTreeMap, HashMap};
 use std::iter::{empty, IntoIterator};
+use std::ops::RangeBounds;
 use std::sync::Arc;
 
 use ordered_float::NotNaN;
@@ -26,7 +27,7 @@ pub fn get_primitive_range<R, U>(
     condition: R,
 ) -> Option<Arc<Value>>
 where
-    R: RangeArgument<U>,
+    R: RangeBounds<U>,
     U: Ord,
 {
     let mut iter = map.range(condition);
@@ -65,7 +66,7 @@ pub fn get_all_prims_range<'a, R, U>(
     condition: R,
 ) -> Box<Iterator<Item = Value> + 'a>
 where
-    R: RangeArgument<U>,
+    R: RangeBounds<U>,
     U: Ord,
 {
     let iter = map.range(condition).flat_map(|(_, vec)| {
@@ -98,7 +99,7 @@ pub fn remove_primitive_range<R, U>(
     condition: R,
 ) -> Option<Arc<Value>>
 where
-    R: RangeArgument<U>,
+    R: RangeBounds<U>,
     U: Ord,
 {
     let mut iter = map.range_mut(condition);
@@ -128,7 +129,7 @@ pub fn remove_all_prims_range<'a, R, U>(
     condition: R,
 ) -> Vec<Arc<Value>>
 where
-    R: RangeArgument<U>,
+    R: RangeBounds<U>,
     U: Ord,
 {
     map.range_mut(condition)
@@ -203,6 +204,28 @@ pub fn remove_value_arc(field_map: &mut HashMap<String, TreeSpaceEntry>, removed
             _ => (),
         }
     }
+}
+
+fn convert_float_bound(bound: Bound<&f64>) -> Bound<NotNaN<f64>> {
+    match bound {
+        Bound::Included(value) => {
+            Bound::Included(NotNaN::new(*value).expect("NaN values are not accepted"))
+        }
+        Bound::Excluded(value) => {
+            Bound::Excluded(NotNaN::new(*value).expect("NaN values are not accepted"))
+        }
+        Bound::Unbounded => Bound::Unbounded,
+    }
+}
+
+pub fn convert_float_range<R>(range: R) -> (Bound<NotNaN<f64>>, Bound<NotNaN<f64>>)
+where
+    R: RangeBounds<f64>,
+{
+    (
+        convert_float_bound(range.start()),
+        convert_float_bound(range.end()),
+    )
 }
 
 pub fn flatten(v: Value) -> Value {
