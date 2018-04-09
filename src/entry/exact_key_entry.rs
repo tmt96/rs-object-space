@@ -19,95 +19,43 @@ pub trait ExactKeyEntry<U> {
     fn remove_all_key<'a>(&'a mut self, field: &str, key: &U) -> Vec<Value>;
 }
 
-impl ExactKeyEntry<i64> for TreeSpaceEntry {
-    fn get_key(&self, field: &str, key: &i64) -> Option<Value> {
-        match self.get_key_helper(field, key) {
-            Some(arc) => {
-                let val: &Value = arc.borrow();
-                Some(val.clone())
+macro_rules! impl_key_entry {
+    ($($ty:ty)*) => {
+        $(
+            impl ExactKeyEntry<$ty> for TreeSpaceEntry {
+                fn get_key(&self, field: &str, key: &$ty) -> Option<Value> {
+                    match self.get_key_helper(field, key) {
+                        Some(arc) => {
+                            let val: &Value = arc.borrow();
+                            Some(val.clone())
+                        }
+                        None => None,
+                    }
+                }
+
+                fn get_all_key<'a>(&'a self, field: &str, key: &$ty) -> Box<Iterator<Item = Value> + 'a> {
+                    self.get_all_key_helper(field, key)
+                }
+
+                fn remove_key(&mut self, field: &str, key: &$ty) -> Option<Value> {
+                    match self.remove_key_helper(field, key) {
+                        Some(arc) => Arc::try_unwrap(arc).ok(),
+                        None => None,
+                    }
+                }
+
+                fn remove_all_key<'a>(&'a mut self, field: &str, key: &$ty) -> Vec<Value> {
+                    self.remove_all_key_helper(field, key)
+                        .into_iter()
+                        .filter_map(|arc| Arc::try_unwrap(arc).ok())
+                        .collect()
+                }
             }
-            None => None,
-        }
-    }
-
-    fn get_all_key<'a>(&'a self, field: &str, key: &i64) -> Box<Iterator<Item = Value> + 'a> {
-        self.get_all_key_helper(field, key)
-    }
-
-    fn remove_key(&mut self, field: &str, key: &i64) -> Option<Value> {
-        match self.remove_key_helper(field, key) {
-            Some(arc) => Arc::try_unwrap(arc).ok(),
-            None => None,
-        }
-    }
-
-    fn remove_all_key<'a>(&'a mut self, field: &str, key: &i64) -> Vec<Value> {
-        self.remove_all_key_helper(field, key)
-            .into_iter()
-            .filter_map(|arc| Arc::try_unwrap(arc).ok())
-            .collect()
-    }
+        )*
+    };
 }
 
-impl ExactKeyEntry<String> for TreeSpaceEntry {
-    fn get_key(&self, field: &str, key: &String) -> Option<Value> {
-        match self.get_key_helper(field, key) {
-            Some(arc) => {
-                let val: &Value = arc.borrow();
-                Some(val.clone())
-            }
-            None => None,
-        }
-    }
-
-    fn get_all_key<'a>(&'a self, field: &str, key: &String) -> Box<Iterator<Item = Value> + 'a> {
-        self.get_all_key_helper(field, key)
-    }
-
-    fn remove_key(&mut self, field: &str, key: &String) -> Option<Value> {
-        match self.remove_key_helper(field, key) {
-            Some(arc) => Arc::try_unwrap(arc).ok(),
-            None => None,
-        }
-    }
-
-    fn remove_all_key<'a>(&'a mut self, field: &str, key: &String) -> Vec<Value> {
-        self.remove_all_key_helper(field, key)
-            .into_iter()
-            .filter_map(|arc| Arc::try_unwrap(arc).ok())
-            .collect()
-    }
-}
-
-impl ExactKeyEntry<bool> for TreeSpaceEntry {
-    fn get_key(&self, field: &str, key: &bool) -> Option<Value> {
-        match self.get_key_helper(field, key) {
-            Some(arc) => {
-                let val: &Value = arc.borrow();
-                Some(val.clone())
-            }
-            None => None,
-        }
-    }
-
-    fn get_all_key<'a>(&'a self, field: &str, key: &bool) -> Box<Iterator<Item = Value> + 'a> {
-        self.get_all_key_helper(field, key)
-    }
-
-    fn remove_key(&mut self, field: &str, key: &bool) -> Option<Value> {
-        match self.remove_key_helper(field, key) {
-            Some(arc) => Arc::try_unwrap(arc).ok(),
-            None => None,
-        }
-    }
-
-    fn remove_all_key<'a>(&'a mut self, field: &str, key: &bool) -> Vec<Value> {
-        self.remove_all_key_helper(field, key)
-            .into_iter()
-            .filter_map(|arc| Arc::try_unwrap(arc).ok())
-            .collect()
-    }
-}
+impl_key_entry!{i64 String bool}
 
 impl ExactKeyEntry<NotNaN<f64>> for TreeSpaceEntry {
     fn get_key(&self, field: &str, key: &NotNaN<f64>) -> Option<Value> {

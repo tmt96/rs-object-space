@@ -32,89 +32,55 @@ pub trait RangeEntry<U> {
         R: RangeArgument<U>;
 }
 
-impl RangeEntry<i64> for TreeSpaceEntry {
-    fn get_range<R>(&self, field: &str, condition: R) -> Option<Value>
-    where
-        R: RangeArgument<i64>,
-    {
-        match self.get_range_helper(field, condition) {
-            Some(arc) => {
-                let val: &Value = arc.borrow();
-                Some(val.clone())
+macro_rules! impl_range_entry {
+    ($($ty:ty)*) => {
+        $(
+            impl RangeEntry<$ty> for TreeSpaceEntry {
+                fn get_range<R>(&self, field: &str, condition: R) -> Option<Value>
+                where
+                    R: RangeArgument<$ty>,
+                {
+                    match self.get_range_helper(field, condition) {
+                        Some(arc) => {
+                            let val: &Value = arc.borrow();
+                            Some(val.clone())
+                        }
+                        None => None,
+                    }
+                }
+
+                fn get_all_range<'a, R>(&'a self, field: &str, condition: R) -> Box<Iterator<Item = Value> + 'a>
+                where
+                    R: RangeArgument<$ty>,
+                {
+                    self.get_all_range_helper(field, condition)
+                }
+
+                fn remove_range<R>(&mut self, field: &str, condition: R) -> Option<Value>
+                where
+                    R: RangeArgument<$ty>,
+                {
+                    match self.remove_range_helper(field, condition) {
+                        Some(arc) => Arc::try_unwrap(arc).ok(),
+                        None => None,
+                    }
+                }
+
+                fn remove_all_range<'a, R>(&'a mut self, field: &str, condition: R) -> Vec<Value>
+                where
+                    R: RangeArgument<$ty>,
+                {
+                    self.remove_all_range_helper(field, condition)
+                        .into_iter()
+                        .filter_map(|arc| Arc::try_unwrap(arc).ok())
+                        .collect()
+                }
             }
-            None => None,
-        }
-    }
-
-    fn get_all_range<'a, R>(&'a self, field: &str, condition: R) -> Box<Iterator<Item = Value> + 'a>
-    where
-        R: RangeArgument<i64>,
-    {
-        self.get_all_range_helper(field, condition)
-    }
-
-    fn remove_range<R>(&mut self, field: &str, condition: R) -> Option<Value>
-    where
-        R: RangeArgument<i64>,
-    {
-        match self.remove_range_helper(field, condition) {
-            Some(arc) => Arc::try_unwrap(arc).ok(),
-            None => None,
-        }
-    }
-
-    fn remove_all_range<'a, R>(&'a mut self, field: &str, condition: R) -> Vec<Value>
-    where
-        R: RangeArgument<i64>,
-    {
-        self.remove_all_range_helper(field, condition)
-            .into_iter()
-            .filter_map(|arc| Arc::try_unwrap(arc).ok())
-            .collect()
-    }
+        )*
+    };
 }
 
-impl RangeEntry<String> for TreeSpaceEntry {
-    fn get_range<R>(&self, field: &str, condition: R) -> Option<Value>
-    where
-        R: RangeArgument<String>,
-    {
-        match self.get_range_helper(field, condition) {
-            Some(arc) => {
-                let val: &Value = arc.borrow();
-                Some(val.clone())
-            }
-            None => None,
-        }
-    }
-
-    fn get_all_range<'a, R>(&'a self, field: &str, condition: R) -> Box<Iterator<Item = Value> + 'a>
-    where
-        R: RangeArgument<String>,
-    {
-        self.get_all_range_helper(field, condition)
-    }
-
-    fn remove_range<R>(&mut self, field: &str, condition: R) -> Option<Value>
-    where
-        R: RangeArgument<String>,
-    {
-        match self.remove_range_helper(field, condition) {
-            Some(arc) => Arc::try_unwrap(arc).ok(),
-            None => None,
-        }
-    }
-
-    fn remove_all_range<'a, R>(&'a mut self, field: &str, condition: R) -> Vec<Value>
-    where
-        R: RangeArgument<String>,
-    {
-        self.remove_all_range_helper(field, condition)
-            .into_iter()
-            .filter_map(|arc| Arc::try_unwrap(arc).ok())
-            .collect()
-    }
-}
+impl_range_entry!{i64 String}
 
 impl RangeEntry<NotNaN<f64>> for TreeSpaceEntry {
     fn get_range<R>(&self, field: &str, condition: R) -> Option<Value>
