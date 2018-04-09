@@ -864,7 +864,7 @@ macro_rules! object_key{
 }
 
 object_range!{i64 String}
-object_key!{i64 String bool /*NotNaN<f64>*/}
+object_key!{i64 String bool f64}
 
 mod tests {
     use super::*;

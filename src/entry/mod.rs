@@ -1,4 +1,3 @@
-use entry::helpers::get_all_prims_key;
 use std::borrow::Borrow;
 use std::collections::range::RangeArgument;
 use std::collections::{BTreeMap, HashMap};
@@ -15,10 +14,10 @@ mod exact_key_entry;
 pub mod helpers;
 mod range_entry;
 
-use self::helpers::{get_all_prims_from_map, get_all_prims_range, get_primitive_from_map,
-                    get_primitive_key, get_primitive_range, remove_all_prims_key,
-                    remove_all_prims_range, remove_object, remove_primitive_from_map,
-                    remove_primitive_key, remove_primitive_range, remove_value_arc};
+use self::helpers::{get_all_prims_from_map, get_primitive_from_map, get_primitive_key,
+                    get_primitive_range, remove_all_prims_key, remove_all_prims_range,
+                    remove_object, remove_primitive_from_map, remove_primitive_key,
+                    remove_primitive_range, remove_value_arc};
 pub use entry::exact_key_entry::ExactKeyEntry;
 pub use entry::range_entry::RangeEntry;
 
@@ -131,18 +130,6 @@ impl TreeSpaceEntry {
         }
     }
 
-    fn get_float_key_helper(&self, field: &str, key: &NotNaN<f64>) -> Option<Arc<Value>> {
-        match *self {
-            TreeSpaceEntry::Null => None,
-            TreeSpaceEntry::FloatLeaf(ref float_map) => get_primitive_key(float_map, key),
-            TreeSpaceEntry::Branch(ref field_map) => match field_map.get(field) {
-                Some(entry) => entry.get_float_key_helper("", key),
-                None => panic!("No such field found!"),
-            },
-            _ => panic!("Not an int type or a struct holding an int"),
-        }
-    }
-
     fn remove_helper(&mut self) -> Option<Arc<Value>> {
         match *self {
             TreeSpaceEntry::Null => None,
@@ -182,28 +169,6 @@ impl TreeSpaceEntry {
         }
     }
 
-    fn remove_float_key(&mut self, field: &str, key: &NotNaN<f64>) -> Option<Arc<Value>> {
-        match *self {
-            TreeSpaceEntry::Null => None,
-            TreeSpaceEntry::FloatLeaf(ref mut float_map) => remove_primitive_key(float_map, key),
-            TreeSpaceEntry::Branch(ref mut object_field_map) => {
-                let arc = match object_field_map.get_mut(field) {
-                    None => panic!("Field {} does not exist", field),
-                    Some(entry) => entry.remove_float_key(field, key),
-                };
-
-                match arc {
-                    Some(arc) => {
-                        remove_value_arc(object_field_map, &arc);
-                        Some(arc)
-                    }
-                    None => None,
-                }
-            }
-            _ => panic!("Not an int type or a struct holding an int"),
-        }
-    }
-
     fn remove_all_float_range<R>(&mut self, field: &str, condition: R) -> Vec<Arc<Value>>
     where
         R: RangeArgument<NotNaN<f64>>,
@@ -228,48 +193,13 @@ impl TreeSpaceEntry {
         }
     }
 
-    fn remove_all_float_key(&mut self, field: &str, key: &NotNaN<f64>) -> Vec<Arc<Value>> {
-        match *self {
-            TreeSpaceEntry::Null => Vec::new(),
-            TreeSpaceEntry::FloatLeaf(ref mut float_map) => remove_all_prims_key(float_map, key),
-            TreeSpaceEntry::Branch(ref mut field_map) => {
-                let arc_list = match field_map.get_mut(field) {
-                    None => panic!("Field {} does not exist", field),
-                    Some(entry) => entry.remove_all_float_key(field, key),
-                };
-
-                for arc in arc_list.iter() {
-                    remove_value_arc(field_map, arc);
-                }
-                arc_list
-            }
-            _ => panic!("Not an int type or a struct holding an int"),
-        }
-    }
-
     fn add_value_by_num(&mut self, num: Number, value: Arc<Value>) {
         if let Some(i) = num.as_i64() {
             self.add_value(i, value);
         } else if let Some(f) = num.as_f64() {
-            self.add_value_by_float(f, value);
+            self.add_value(f, value);
         } else {
             panic!("Not a number!");
-        }
-    }
-
-    fn add_value_by_float(&mut self, f: f64, value: Arc<Value>) {
-        if let &mut TreeSpaceEntry::Null = self {
-            *self = TreeSpaceEntry::FloatLeaf(BTreeMap::new());
-        }
-
-        let key = NotNaN::new(f).expect("NaN is not allowed");
-
-        match *self {
-            TreeSpaceEntry::FloatLeaf(ref mut map) => {
-                let vec = map.entry(key).or_insert(Vec::new());
-                vec.push(value);
-            }
-            _ => panic!("Incorrect data type! Found float."),
         }
     }
 
@@ -308,34 +238,6 @@ impl TreeSpaceEntry {
 
 trait ValueCollection<T> {
     fn add_value(&mut self, criteria: T, value: Arc<Value>);
-
-    fn get_range_helper<R>(&self, field: &str, condition: R) -> Option<Arc<Value>>
-    where
-        R: RangeArgument<T>;
-
-    fn get_all_range_helper<'a, R>(
-        &'a self,
-        field: &str,
-        condition: R,
-    ) -> Box<Iterator<Item = Value> + 'a>
-    where
-        R: RangeArgument<T>;
-
-    fn remove_range_helper<R>(&mut self, field: &str, condition: R) -> Option<Arc<Value>>
-    where
-        R: RangeArgument<T>;
-
-    fn remove_all_range_helper<R>(&mut self, field: &str, condition: R) -> Vec<Arc<Value>>
-    where
-        R: RangeArgument<T>;
-
-    fn get_key_helper(&self, field: &str, key: &T) -> Option<Arc<Value>>;
-
-    fn get_all_key_helper<'a>(&'a self, field: &str, key: &T) -> Box<Iterator<Item = Value> + 'a>;
-
-    fn remove_key_helper(&mut self, field: &str, key: &T) -> Option<Arc<Value>>;
-
-    fn remove_all_key_helper(&mut self, field: &str, key: &T) -> Vec<Arc<Value>>;
 }
 
 macro_rules! impl_val_collection {
@@ -355,157 +257,21 @@ macro_rules! impl_val_collection {
                         _ => panic!("Incorrect data type!"),
                     }
                 }
-
-                fn get_range_helper<R>(&self, field: &str, condition: R) -> Option<Arc<Value>>
-                where
-                    R: RangeArgument<$ty>,
-                {
-                    match *self {
-                        TreeSpaceEntry::Null => None,
-                        TreeSpaceEntry::$path(ref map) => get_primitive_range(map, condition),
-                        TreeSpaceEntry::Branch(ref field_map) => match field_map.get(field) {
-                            Some(entry) => entry.get_range_helper("", condition),
-                            None => panic!("No such field found!"),
-                        },
-                        _ => panic!("Not correct type"),
-                    }
-                }
-
-                fn get_all_range_helper<'a, R>(&'a self, field: &str, condition: R) -> Box<Iterator<Item = Value> + 'a>
-                where
-                    R: RangeArgument<$ty>,
-                {
-                    match *self {
-                        TreeSpaceEntry::Null => Box::new(empty()),
-                        TreeSpaceEntry::$path(ref map) => {
-                            get_all_prims_range(map, condition)
-                        }
-                        TreeSpaceEntry::Branch(ref field_map) => match field_map.get(field) {
-                            Some(entry) => entry.get_all_range_helper("", condition),
-                            None => panic!("No such field found!"),
-                        },
-                        _ => panic!("Not an int type or a struct holding an int"),
-                    }
-                }
-
-                fn remove_range_helper<R>(&mut self, field: &str, condition: R) -> Option<Arc<Value>>
-                where
-                    R: RangeArgument<$ty>,
-                {
-                    match *self {
-                        TreeSpaceEntry::Null => None,
-                        TreeSpaceEntry::$path(ref mut map) => remove_primitive_range(map, condition),
-                        TreeSpaceEntry::Branch(ref mut object_field_map) => {
-                            let arc = match object_field_map.get_mut(field) {
-                                None => panic!("Field {} does not exist", field),
-                                Some(entry) => entry.remove_range_helper(field, condition),
-                            };
-
-                            match arc {
-                                Some(arc) => {
-                                    remove_value_arc(object_field_map, &arc);
-                                    Some(arc)
-                                }
-                                None => None,
-                            }
-                        }
-                        _ => panic!("Not correct type"),
-                    }
-                }
-
-                fn remove_all_range_helper<R>(&mut self, field: &str, condition: R) -> Vec<Arc<Value>>
-                where
-                    R: RangeArgument<$ty>,
-                {
-                    match *self {
-                        TreeSpaceEntry::Null => Vec::new(),
-                        TreeSpaceEntry::$path(ref mut map) => remove_all_prims_range(map, condition),
-                        TreeSpaceEntry::Branch(ref mut field_map) => {
-                            let arc_list = match field_map.get_mut(field) {
-                                None => panic!("Field {} does not exist", field),
-                                Some(entry) => entry.remove_all_range_helper(field, condition),
-                            };
-
-                            for arc in arc_list.iter() {
-                                remove_value_arc(field_map, arc);
-                            }
-                            arc_list
-                        }
-                        _ => panic!("Not correct type"),
-                    }
-                }
-
-
-                fn get_key_helper(&self, field: &str, key: &$ty) -> Option<Arc<Value>> {
-                    match *self {
-                        TreeSpaceEntry::Null => None,
-                        TreeSpaceEntry::$path(ref map) => get_primitive_key(map, key),
-                        TreeSpaceEntry::Branch(ref field_map) => match field_map.get(field) {
-                            Some(entry) => entry.get_key_helper("", key),
-                            None => panic!("No such field found!"),
-                        },
-                        _ => panic!("Not correct type"),
-                    }
-                }
-
-                fn get_all_key_helper<'a>(&'a self, field: &str, key: &$ty) -> Box<Iterator<Item = Value> + 'a> {
-                    match *self {
-                        TreeSpaceEntry::Null => Box::new(empty()),
-                        TreeSpaceEntry::$path(ref int_map) => get_all_prims_key(int_map, &key),
-                        TreeSpaceEntry::Branch(ref field_map) => match field_map.get(field) {
-                            Some(entry) => entry.get_all_key_helper("", key),
-                            None => panic!("No such field found!"),
-                        },
-                        _ => panic!("Not an int type or a struct holding an int"),
-                    }
-                }
-
-
-                fn remove_key_helper(&mut self, field: &str, key: &$ty) -> Option<Arc<Value>> {
-                    match *self {
-                        TreeSpaceEntry::Null => None,
-                        TreeSpaceEntry::$path(ref mut map) => remove_primitive_key(map, key),
-                        TreeSpaceEntry::Branch(ref mut object_field_map) => {
-                            let arc = match object_field_map.get_mut(field) {
-                                None => panic!("Field {} does not exist", field),
-                                Some(entry) => entry.remove_key_helper(field, key),
-                            };
-
-                            match arc {
-                                Some(arc) => {
-                                    remove_value_arc(object_field_map, &arc);
-                                    Some(arc)
-                                }
-                                None => None,
-                            }
-                        }
-                        _ => panic!("Not correct type"),
-                    }
-                }
-                fn remove_all_key_helper(&mut self, field: &str, key: &$ty) -> Vec<Arc<Value>> {
-                    match *self {
-                        TreeSpaceEntry::Null => Vec::new(),
-                        TreeSpaceEntry::$path(ref mut map) => remove_all_prims_key(map, key),
-                        TreeSpaceEntry::Branch(ref mut field_map) => {
-                            let arc_list = match field_map.get_mut(field) {
-                                None => panic!("Field {} does not exist", field),
-                                Some(entry) => entry.remove_all_key_helper(field, key),
-                            };
-
-                            for arc in arc_list.iter() {
-                                remove_value_arc(field_map, arc);
-                            }
-                            arc_list
-                        }
-                        _ => panic!("Not an correct type"),
-                    }
-                }
             }
         )*
     };
 }
 
-impl_val_collection!{[IntLeaf, i64] [StringLeaf, String] [BoolLeaf, bool] }
+impl_val_collection!{[IntLeaf, i64] [StringLeaf, String] [BoolLeaf, bool] [FloatLeaf, NotNaN<f64>] }
+
+impl ValueCollection<f64> for TreeSpaceEntry {
+    fn add_value(&mut self, criteria: f64, value: Arc<Value>) {
+        self.add_value(
+            NotNaN::new(criteria).expect("cannot add an NaN value"),
+            value,
+        )
+    }
+}
 
 // #[cfg(test)]
 // mod tests {

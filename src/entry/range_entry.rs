@@ -7,8 +7,9 @@ use std::sync::Arc;
 use ordered_float::NotNaN;
 use serde_json::value::Value;
 
-use entry::helpers::get_all_prims_range;
-use entry::{TreeSpaceEntry, ValueCollection};
+use entry::TreeSpaceEntry;
+use entry::helpers::{get_all_prims_range, get_primitive_range, remove_all_prims_range,
+                     remove_primitive_range, remove_value_arc};
 
 pub trait RangeEntry<U> {
     fn get_range<R>(&self, field: &str, condition: R) -> Option<Value>
@@ -81,6 +82,118 @@ macro_rules! impl_range_entry {
 }
 
 impl_range_entry!{i64 String}
+
+trait RangeValueCollection<T> {
+    fn get_range_helper<R>(&self, field: &str, condition: R) -> Option<Arc<Value>>
+    where
+        R: RangeArgument<T>;
+
+    fn get_all_range_helper<'a, R>(
+        &'a self,
+        field: &str,
+        condition: R,
+    ) -> Box<Iterator<Item = Value> + 'a>
+    where
+        R: RangeArgument<T>;
+
+    fn remove_range_helper<R>(&mut self, field: &str, condition: R) -> Option<Arc<Value>>
+    where
+        R: RangeArgument<T>;
+
+    fn remove_all_range_helper<R>(&mut self, field: &str, condition: R) -> Vec<Arc<Value>>
+    where
+        R: RangeArgument<T>;
+}
+
+macro_rules! impl_range_val_collection {
+    ($([$path:ident, $ty:ty])*) => {
+        $(
+            impl RangeValueCollection<$ty> for TreeSpaceEntry {
+
+                fn get_range_helper<R>(&self, field: &str, condition: R) -> Option<Arc<Value>>
+                where
+                    R: RangeArgument<$ty>,
+                {
+                    match *self {
+                        TreeSpaceEntry::Null => None,
+                        TreeSpaceEntry::$path(ref map) => get_primitive_range(map, condition),
+                        TreeSpaceEntry::Branch(ref field_map) => match field_map.get(field) {
+                            Some(entry) => entry.get_range_helper("", condition),
+                            None => panic!("No such field found!"),
+                        },
+                        _ => panic!("Not correct type"),
+                    }
+                }
+
+                fn get_all_range_helper<'a, R>(&'a self, field: &str, condition: R) -> Box<Iterator<Item = Value> + 'a>
+                where
+                    R: RangeArgument<$ty>,
+                {
+                    match *self {
+                        TreeSpaceEntry::Null => Box::new(empty()),
+                        TreeSpaceEntry::$path(ref map) => {
+                            get_all_prims_range(map, condition)
+                        }
+                        TreeSpaceEntry::Branch(ref field_map) => match field_map.get(field) {
+                            Some(entry) => entry.get_all_range_helper("", condition),
+                            None => panic!("No such field found!"),
+                        },
+                        _ => panic!("Not an int type or a struct holding an int"),
+                    }
+                }
+
+                fn remove_range_helper<R>(&mut self, field: &str, condition: R) -> Option<Arc<Value>>
+                where
+                    R: RangeArgument<$ty>,
+                {
+                    match *self {
+                        TreeSpaceEntry::Null => None,
+                        TreeSpaceEntry::$path(ref mut map) => remove_primitive_range(map, condition),
+                        TreeSpaceEntry::Branch(ref mut object_field_map) => {
+                            let arc = match object_field_map.get_mut(field) {
+                                None => panic!("Field {} does not exist", field),
+                                Some(entry) => entry.remove_range_helper(field, condition),
+                            };
+
+                            match arc {
+                                Some(arc) => {
+                                    remove_value_arc(object_field_map, &arc);
+                                    Some(arc)
+                                }
+                                None => None,
+                            }
+                        }
+                        _ => panic!("Not correct type"),
+                    }
+                }
+
+                fn remove_all_range_helper<R>(&mut self, field: &str, condition: R) -> Vec<Arc<Value>>
+                where
+                    R: RangeArgument<$ty>,
+                {
+                    match *self {
+                        TreeSpaceEntry::Null => Vec::new(),
+                        TreeSpaceEntry::$path(ref mut map) => remove_all_prims_range(map, condition),
+                        TreeSpaceEntry::Branch(ref mut field_map) => {
+                            let arc_list = match field_map.get_mut(field) {
+                                None => panic!("Field {} does not exist", field),
+                                Some(entry) => entry.remove_all_range_helper(field, condition),
+                            };
+
+                            for arc in arc_list.iter() {
+                                remove_value_arc(field_map, arc);
+                            }
+                            arc_list
+                        }
+                        _ => panic!("Not correct type"),
+                    }
+                }
+            }
+        )*
+    };
+}
+
+impl_range_val_collection!{[IntLeaf, i64] [StringLeaf, String]}
 
 impl RangeEntry<NotNaN<f64>> for TreeSpaceEntry {
     fn get_range<R>(&self, field: &str, condition: R) -> Option<Value>
