@@ -125,10 +125,12 @@ impl TreeSpaceEntry {
     }
 
     fn add_value_by_num(&mut self, num: Number, value: Arc<Value>) {
-        if let Some(i) = num.as_i64() {
+        // only parse as f64 if it is actually f64
+        // (e.g: accept '64.0' but not '64')
+        if num.is_f64() {
+            self.add_value(num.as_f64().unwrap(), value);
+        } else if let Some(i) = num.as_i64() {
             self.add_value(i, value);
-        } else if let Some(f) = num.as_f64() {
-            self.add_value(f, value);
         } else {
             panic!("Not a number!");
         }

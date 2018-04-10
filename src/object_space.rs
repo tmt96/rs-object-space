@@ -3,7 +3,6 @@ use std::ops::RangeBounds;
 use std::sync::{Arc, Condvar, Mutex};
 
 use chashmap::{CHashMap, ReadGuard, WriteGuard};
-use ordered_float::NotNaN;
 use serde::{Deserialize, Serialize};
 use serde_json::value::{from_value, to_value};
 
@@ -869,15 +868,16 @@ object_key!{i64 String bool f64}
 mod tests {
     use super::*;
 
-    #[derive(Serialize, Deserialize, PartialEq, Eq, Debug)]
+    #[derive(Serialize, Deserialize, PartialEq, Debug)]
     struct TestStruct {
         count: i32,
         name: String,
     }
 
-    #[derive(Serialize, Deserialize, PartialEq, Eq, Debug)]
+    #[derive(Serialize, Deserialize, PartialEq, Debug)]
     struct CompoundStruct {
         person: TestStruct,
+        gpa: f64,
     }
 
     #[test]
@@ -894,6 +894,7 @@ mod tests {
                 count: 3,
                 name: String::from("Tuan"),
             },
+            gpa: 3.0,
         });
 
         assert_eq!(
@@ -917,6 +918,7 @@ mod tests {
                     count: 3,
                     name: String::from("Tuan"),
                 },
+                gpa: 3.0
             })
         );
         assert!(space.try_read::<CompoundStruct>().is_some());
@@ -936,6 +938,7 @@ mod tests {
                 count: 3,
                 name: String::from("Tuan"),
             },
+            gpa: 3.5,
         });
 
         assert_eq!(
@@ -960,6 +963,7 @@ mod tests {
                     count: 3,
                     name: String::from("Tuan"),
                 },
+                gpa: 3.5
             })
         );
         assert!(space.try_take::<CompoundStruct>().is_none());
@@ -1049,12 +1053,14 @@ mod tests {
                 count: 5,
                 name: String::from("Duane"),
             },
+            gpa: 3.0,
         });
         space.write(CompoundStruct {
             person: TestStruct {
                 count: 3,
                 name: String::from("Tuan"),
             },
+            gpa: 3.5,
         });
 
         assert_eq!(
@@ -1064,6 +1070,7 @@ mod tests {
                     count: 3,
                     name: String::from("Tuan"),
                 },
+                gpa: 3.5
             })
         );
         assert!(
@@ -1109,21 +1116,24 @@ mod tests {
                 count: 3,
                 name: String::from("Tuan"),
             },
+            gpa: 3.0,
         });
         space.write(CompoundStruct {
             person: TestStruct {
                 count: 5,
                 name: String::from("Duane"),
             },
+            gpa: 3.5,
         });
 
         assert_eq!(
-            space.try_take_range::<CompoundStruct, _>("person.count", 2..4),
+            space.try_take_range::<CompoundStruct, _>("gpa", 3.0..3.5),
             Some(CompoundStruct {
                 person: TestStruct {
                     count: 3,
                     name: String::from("Tuan"),
                 },
+                gpa: 3.0
             })
         );
         assert!(
@@ -1169,23 +1179,26 @@ mod tests {
                 count: 5,
                 name: String::from("Duane"),
             },
+            gpa: 4.0,
         });
         space.write(CompoundStruct {
             person: TestStruct {
                 count: 3,
                 name: String::from("Tuan"),
             },
+            gpa: 3.0,
         });
         space.write(CompoundStruct {
             person: TestStruct {
                 count: 3,
                 name: String::from("Minh"),
             },
+            gpa: 3.0,
         });
 
         assert_eq!(
             space
-                .read_all_range::<CompoundStruct, _>("person.count", 2..4)
+                .read_all_range::<CompoundStruct, _>("gpa", 2.5..4.0)
                 .count(),
             2
         );
@@ -1237,23 +1250,26 @@ mod tests {
                 count: 5,
                 name: String::from("Duane"),
             },
+            gpa: 3.5,
         });
         space.write(CompoundStruct {
             person: TestStruct {
                 count: 3,
                 name: String::from("Tuan"),
             },
+            gpa: 3.0,
         });
         space.write(CompoundStruct {
             person: TestStruct {
                 count: 3,
                 name: String::from("Minh"),
             },
+            gpa: 3.0,
         });
 
         assert_eq!(
             space
-                .take_all_range::<CompoundStruct, _>("person.count", 2..4)
+                .take_all_range::<CompoundStruct, _>("gpa", 2.5..3.5)
                 .count(),
             2
         );
@@ -1265,7 +1281,7 @@ mod tests {
         );
         assert_eq!(
             space
-                .take_all_range::<CompoundStruct, _>("person.count", 4..)
+                .take_all_range::<CompoundStruct, _>("gpa", 3.5..)
                 .count(),
             1
         );
@@ -1304,12 +1320,14 @@ mod tests {
                 count: 5,
                 name: String::from("Duane"),
             },
+            gpa: 4.0,
         });
         space.write(CompoundStruct {
             person: TestStruct {
                 count: 3,
                 name: String::from("Tuan"),
             },
+            gpa: 3.0,
         });
 
         assert_eq!(
@@ -1319,13 +1337,10 @@ mod tests {
                     count: 3,
                     name: String::from("Tuan"),
                 },
+                gpa: 3.0
             })
         );
-        assert!(
-            space
-                .try_read_key::<CompoundStruct>("person.count", &3)
-                .is_some()
-        );
+        assert!(space.try_read_key::<CompoundStruct>("gpa", &3.0).is_some());
     }
 
     #[test]
@@ -1356,6 +1371,7 @@ mod tests {
                 count: 3,
                 name: String::from("Tuan"),
             },
+            gpa: 3.0,
         });
 
         assert_eq!(
@@ -1365,13 +1381,10 @@ mod tests {
                     count: 3,
                     name: String::from("Tuan"),
                 },
+                gpa: 3.0
             })
         );
-        assert!(
-            space
-                .try_take_key::<CompoundStruct>("person.count", &3)
-                .is_none()
-        );
+        assert!(space.try_take_key::<CompoundStruct>("gpa", &3.0).is_none());
     }
 
     #[test]
@@ -1404,18 +1417,21 @@ mod tests {
                 count: 5,
                 name: String::from("Duane"),
             },
+            gpa: 4.0,
         });
         space.write(CompoundStruct {
             person: TestStruct {
                 count: 3,
                 name: String::from("Tuan"),
             },
+            gpa: 3.0,
         });
         space.write(CompoundStruct {
             person: TestStruct {
                 count: 3,
                 name: String::from("Minh"),
             },
+            gpa: 3.5,
         });
 
         assert_eq!(
@@ -1430,12 +1446,7 @@ mod tests {
                 .count(),
             0
         );
-        assert_eq!(
-            space
-                .read_all_key::<CompoundStruct>("person.count", &5)
-                .count(),
-            1
-        );
+        assert_eq!(space.read_all_key::<CompoundStruct>("gpa", &4.0).count(), 1);
     }
 
     #[test]
@@ -1469,26 +1480,24 @@ mod tests {
                 count: 5,
                 name: String::from("Duane"),
             },
+            gpa: 4.0,
         });
         space.write(CompoundStruct {
             person: TestStruct {
                 count: 3,
                 name: String::from("Tuan"),
             },
+            gpa: 3.0,
         });
         space.write(CompoundStruct {
             person: TestStruct {
                 count: 3,
                 name: String::from("Minh"),
             },
+            gpa: 3.0,
         });
 
-        assert_eq!(
-            space
-                .take_all_key::<CompoundStruct>("person.count", &3)
-                .count(),
-            2
-        );
+        assert_eq!(space.take_all_key::<CompoundStruct>("gpa", &3.0).count(), 2);
         assert_eq!(
             space
                 .take_all_key::<CompoundStruct>("person.count", &3)
