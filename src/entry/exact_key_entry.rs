@@ -1,255 +1,179 @@
-use std::iter::empty;
-use std::sync::Arc;
 use std::borrow::Borrow;
 use std::iter::IntoIterator;
+use std::iter::empty;
+use std::sync::Arc;
 
-use serde_json::value::{from_value, Value};
-use serde::ser::Serialize;
-use serde::de::Deserialize;
 use ordered_float::NotNaN;
+use serde_json::value::Value;
 
-use entry::helpers::{deflatten, get_all_prims_key};
 use entry::TreeSpaceEntry;
+use entry::helpers::{get_all_prims_key, get_primitive_key, remove_all_prims_key,
+                     remove_primitive_key, remove_value_arc};
 
 pub trait ExactKeyEntry<U> {
-    fn get_key<T>(&self, field: &str, key: &U) -> Option<T>
-    where
-        for<'de> T: Serialize + Deserialize<'de>;
+    fn get_key(&self, field: &str, key: &U) -> Option<Value>;
 
-    fn get_all_key<'a, T>(&'a self, field: &str, key: &U) -> Box<Iterator<Item = T> + 'a>
-    where
-        for<'de> T: Deserialize<'de> + 'static;
+    fn get_all_key<'a>(&'a self, field: &str, key: &U) -> Box<Iterator<Item = Value> + 'a>;
 
-    fn remove_key<T>(&mut self, field: &str, key: &U) -> Option<T>
-    where
-        for<'de> T: Serialize + Deserialize<'de>;
+    fn remove_key(&mut self, field: &str, key: &U) -> Option<Value>;
 
-    fn remove_all_key<'a, T>(&'a mut self, field: &str, key: &U) -> Vec<T>
-    where
-        for<'de> T: Deserialize<'de> + 'static;
+    fn remove_all_key<'a>(&'a mut self, field: &str, key: &U) -> Vec<Value>;
 }
 
-impl ExactKeyEntry<i64> for TreeSpaceEntry {
-    fn get_key<T>(&self, field: &str, key: &i64) -> Option<T>
-    where
-        for<'de> T: Serialize + Deserialize<'de>,
-    {
-        match self.get_int_key_helper(field, key) {
-            Some(arc) => {
-                let val: &Value = arc.borrow();
-                from_value(deflatten(val.clone())).ok()
+macro_rules! impl_key_entry {
+    ($($ty:ty)*) => {
+        $(
+            impl ExactKeyEntry<$ty> for TreeSpaceEntry {
+                fn get_key(&self, field: &str, key: &$ty) -> Option<Value> {
+                    match self.get_key_helper(field, key) {
+                        Some(arc) => {
+                            let val: &Value = arc.borrow();
+                            Some(val.clone())
+                        }
+                        None => None,
+                    }
+                }
+
+                fn get_all_key<'a>(&'a self, field: &str, key: &$ty) -> Box<Iterator<Item = Value> + 'a> {
+                    self.get_all_key_helper(field, key)
+                }
+
+                fn remove_key(&mut self, field: &str, key: &$ty) -> Option<Value> {
+                    match self.remove_key_helper(field, key) {
+                        Some(arc) => Arc::try_unwrap(arc).ok(),
+                        None => None,
+                    }
+                }
+
+                fn remove_all_key<'a>(&'a mut self, field: &str, key: &$ty) -> Vec<Value> {
+                    self.remove_all_key_helper(field, key)
+                        .into_iter()
+                        .filter_map(|arc| Arc::try_unwrap(arc).ok())
+                        .collect()
+                }
             }
-            None => None,
-        }
-    }
-
-    fn get_all_key<'a, T>(&'a self, field: &str, key: &i64) -> Box<Iterator<Item = T> + 'a>
-    where
-        for<'de> T: Deserialize<'de> + 'static,
-    {
-        match *self {
-            TreeSpaceEntry::Null => Box::new(empty()),
-            TreeSpaceEntry::IntLeaf(ref int_map) => get_all_prims_key(int_map, &key),
-            TreeSpaceEntry::Branch(ref field_map) => match field_map.get(field) {
-                Some(entry) => entry.get_all_key::<T>("", key),
-                None => panic!("No such field found!"),
-            },
-            _ => panic!("Not an int type or a struct holding an int"),
-        }
-    }
-
-    fn remove_key<T>(&mut self, field: &str, key: &i64) -> Option<T>
-    where
-        for<'de> T: Serialize + Deserialize<'de>,
-    {
-        match self.remove_int_key(field, key) {
-            Some(arc) => match Arc::try_unwrap(arc) {
-                Ok(key) => from_value(deflatten(key)).ok(),
-                Err(_) => None,
-            },
-            None => None,
-        }
-    }
-
-    fn remove_all_key<'a, T>(&'a mut self, field: &str, key: &i64) -> Vec<T>
-    where
-        for<'de> T: Deserialize<'de> + 'static,
-    {
-        self.remove_all_int_key(field, key)
-            .into_iter()
-            .filter_map(|arc| match Arc::try_unwrap(arc) {
-                Ok(key) => from_value(deflatten(key)).ok(),
-                Err(_) => None,
-            })
-            .collect()
-    }
+        )*
+    };
 }
 
-impl ExactKeyEntry<String> for TreeSpaceEntry {
-    fn get_key<T>(&self, field: &str, key: &String) -> Option<T>
-    where
-        for<'de> T: Serialize + Deserialize<'de>,
-    {
-        match self.get_string_key_helper(field, key) {
-            Some(arc) => {
-                let val: &Value = arc.borrow();
-                from_value(deflatten(val.clone())).ok()
-            }
-            None => None,
-        }
-    }
+impl_key_entry!{i64 String bool f64}
 
-    fn get_all_key<'a, T>(&'a self, field: &str, key: &String) -> Box<Iterator<Item = T> + 'a>
-    where
-        for<'de> T: Deserialize<'de> + 'static,
-    {
-        match *self {
-            TreeSpaceEntry::Null => Box::new(empty()),
-            TreeSpaceEntry::StringLeaf(ref string_map) => get_all_prims_key(string_map, key),
-            TreeSpaceEntry::Branch(ref field_map) => match field_map.get(field) {
-                Some(entry) => entry.get_all_key("", key),
-                None => panic!("No such field found!"),
-            },
-            _ => panic!("Not an int type or a struct holding an int"),
-        }
-    }
+trait KeyValueCollection<T> {
+    fn get_key_helper(&self, field: &str, key: &T) -> Option<Arc<Value>>;
 
-    fn remove_key<T>(&mut self, field: &str, key: &String) -> Option<T>
-    where
-        for<'de> T: Serialize + Deserialize<'de>,
-    {
-        match self.remove_string_key(field, key) {
-            Some(arc) => match Arc::try_unwrap(arc) {
-                Ok(value) => from_value(deflatten(value)).ok(),
-                Err(_) => None,
-            },
-            None => None,
-        }
-    }
+    fn get_all_key_helper<'a>(&'a self, field: &str, key: &T) -> Box<Iterator<Item = Value> + 'a>;
 
-    fn remove_all_key<'a, T>(&'a mut self, field: &str, key: &String) -> Vec<T>
-    where
-        for<'de> T: Deserialize<'de> + 'static,
-    {
-        self.remove_all_string_key(field, key)
-            .into_iter()
-            .filter_map(|arc| match Arc::try_unwrap(arc) {
-                Ok(value) => from_value(deflatten(value)).ok(),
-                Err(_) => None,
-            })
-            .collect()
-    }
+    fn remove_key_helper(&mut self, field: &str, key: &T) -> Option<Arc<Value>>;
+
+    fn remove_all_key_helper(&mut self, field: &str, key: &T) -> Vec<Arc<Value>>;
 }
 
-impl ExactKeyEntry<bool> for TreeSpaceEntry {
-    fn get_key<T>(&self, field: &str, key: &bool) -> Option<T>
-    where
-        for<'de> T: Serialize + Deserialize<'de>,
-    {
-        match self.get_bool_key_helper(field, key) {
-            Some(arc) => {
-                let val: &Value = arc.borrow();
-                from_value(deflatten(val.clone())).ok()
+macro_rules! impl_key_collection {
+    ($([$path:ident, $ty:ty])*) => {
+        $(
+            impl KeyValueCollection<$ty> for TreeSpaceEntry {
+                fn get_key_helper(&self, field: &str, key: &$ty) -> Option<Arc<Value>> {
+                    match *self {
+                        TreeSpaceEntry::Null => None,
+                        TreeSpaceEntry::$path(ref map) => get_primitive_key(map, key),
+                        TreeSpaceEntry::Branch(ref field_map) => match field_map.get(field) {
+                            Some(entry) => entry.get_key_helper("", key),
+                            None => panic!("No such field found!"),
+                        },
+                        _ => panic!("Not correct type"),
+                    }
+                }
+
+                fn get_all_key_helper<'a>(&'a self, field: &str, key: &$ty) -> Box<Iterator<Item = Value> + 'a> {
+                    match *self {
+                        TreeSpaceEntry::Null => Box::new(empty()),
+                        TreeSpaceEntry::$path(ref int_map) => get_all_prims_key(int_map, &key),
+                        TreeSpaceEntry::Branch(ref field_map) => match field_map.get(field) {
+                            Some(entry) => entry.get_all_key_helper("", key),
+                            None => panic!("No such field found!"),
+                        },
+                        _ => panic!("Not an int type or a struct holding an int"),
+                    }
+                }
+
+
+                fn remove_key_helper(&mut self, field: &str, key: &$ty) -> Option<Arc<Value>> {
+                    match *self {
+                        TreeSpaceEntry::Null => None,
+                        TreeSpaceEntry::$path(ref mut map) => remove_primitive_key(map, key),
+                        TreeSpaceEntry::Branch(ref mut object_field_map) => {
+                            let arc = match object_field_map.get_mut(field) {
+                                None => panic!("Field {} does not exist", field),
+                                Some(entry) => entry.remove_key_helper(field, key),
+                            };
+
+                            match arc {
+                                Some(arc) => {
+                                    remove_value_arc(object_field_map, &arc);
+                                    Some(arc)
+                                }
+                                None => None,
+                            }
+                        }
+                        _ => panic!("Not correct type"),
+                    }
+                }
+                fn remove_all_key_helper(&mut self, field: &str, key: &$ty) -> Vec<Arc<Value>> {
+                    match *self {
+                        TreeSpaceEntry::Null => Vec::new(),
+                        TreeSpaceEntry::$path(ref mut map) => remove_all_prims_key(map, key),
+                        TreeSpaceEntry::Branch(ref mut field_map) => {
+                            let arc_list = match field_map.get_mut(field) {
+                                None => panic!("Field {} does not exist", field),
+                                Some(entry) => entry.remove_all_key_helper(field, key),
+                            };
+
+                            for arc in &arc_list {
+                                remove_value_arc(field_map, arc);
+                            }
+                            arc_list
+                        }
+                        _ => panic!("Not an correct type"),
+                    }
+                }
             }
-            None => None,
-        }
-    }
-
-    fn get_all_key<'a, T>(&'a self, field: &str, key: &bool) -> Box<Iterator<Item = T> + 'a>
-    where
-        for<'de> T: Deserialize<'de> + 'static,
-    {
-        match *self {
-            TreeSpaceEntry::Null => Box::new(empty()),
-            TreeSpaceEntry::BoolLeaf(ref bool_map) => get_all_prims_key(bool_map, key),
-            TreeSpaceEntry::Branch(ref field_map) => match field_map.get(field) {
-                Some(entry) => entry.get_all_key("", key),
-                None => panic!("No such field found!"),
-            },
-            _ => panic!("Not an int type or a struct holding an int"),
-        }
-    }
-
-    fn remove_key<T>(&mut self, field: &str, key: &bool) -> Option<T>
-    where
-        for<'de> T: Serialize + Deserialize<'de>,
-    {
-        match self.remove_bool_key(field, key) {
-            Some(arc) => match Arc::try_unwrap(arc) {
-                Ok(value) => from_value(deflatten(value)).ok(),
-                Err(_) => None,
-            },
-            None => None,
-        }
-    }
-
-    fn remove_all_key<'a, T>(&'a mut self, field: &str, key: &bool) -> Vec<T>
-    where
-        for<'de> T: Deserialize<'de> + 'static,
-    {
-        self.remove_all_bool_key(field, key)
-            .into_iter()
-            .filter_map(|arc| match Arc::try_unwrap(arc) {
-                Ok(value) => from_value(deflatten(value)).ok(),
-                Err(_) => None,
-            })
-            .collect()
-    }
+        )*
+    };
 }
 
-impl ExactKeyEntry<NotNaN<f64>> for TreeSpaceEntry {
-    fn get_key<T>(&self, field: &str, key: &NotNaN<f64>) -> Option<T>
-    where
-        for<'de> T: Serialize + Deserialize<'de>,
-    {
-        match self.get_float_key_helper(field, key) {
-            Some(arc) => {
-                let val: &Value = arc.borrow();
-                from_value(deflatten(val.clone())).ok()
-            }
-            None => None,
-        }
+impl_key_collection!{[IntLeaf, i64] [StringLeaf, String] [BoolLeaf, bool] [FloatLeaf, NotNaN<f64>] }
+
+impl KeyValueCollection<f64> for TreeSpaceEntry {
+    fn get_key_helper(&self, field: &str, key: &f64) -> Option<Arc<Value>> {
+        self.get_key_helper(
+            field,
+            &NotNaN::new(*key).expect("NaN value is not accepted"),
+        )
     }
 
-    fn get_all_key<'a, T>(&'a self, field: &str, key: &NotNaN<f64>) -> Box<Iterator<Item = T> + 'a>
-    where
-        for<'de> T: Deserialize<'de> + 'static,
-    {
-        match *self {
-            TreeSpaceEntry::Null => Box::new(empty()),
-            TreeSpaceEntry::FloatLeaf(ref float_map) => get_all_prims_key(float_map, key),
-            TreeSpaceEntry::Branch(ref field_map) => match field_map.get(field) {
-                Some(entry) => entry.get_all_key("", key),
-                None => panic!("No such field found!"),
-            },
-            _ => panic!("Not an int type or a struct holding an int"),
-        }
+    fn get_all_key_helper<'a>(
+        &'a self,
+        field: &str,
+        key: &f64,
+    ) -> Box<Iterator<Item = Value> + 'a> {
+        self.get_all_key_helper(
+            field,
+            &NotNaN::new(*key).expect("NaN value is not accepted"),
+        )
     }
 
-    fn remove_key<T>(&mut self, field: &str, key: &NotNaN<f64>) -> Option<T>
-    where
-        for<'de> T: Serialize + Deserialize<'de>,
-    {
-        match self.remove_float_key(field, key) {
-            Some(arc) => match Arc::try_unwrap(arc) {
-                Ok(value) => from_value(deflatten(value)).ok(),
-                Err(_) => None,
-            },
-            None => None,
-        }
+    fn remove_key_helper(&mut self, field: &str, key: &f64) -> Option<Arc<Value>> {
+        self.remove_key_helper(
+            field,
+            &NotNaN::new(*key).expect("NaN value is not accepted"),
+        )
     }
 
-    fn remove_all_key<'a, T>(&'a mut self, field: &str, key: &NotNaN<f64>) -> Vec<T>
-    where
-        for<'de> T: Deserialize<'de> + 'static,
-    {
-        self.remove_all_float_key(field, key)
-            .into_iter()
-            .filter_map(|arc| match Arc::try_unwrap(arc) {
-                Ok(value) => from_value(deflatten(value)).ok(),
-                Err(_) => None,
-            })
-            .collect()
+    fn remove_all_key_helper(&mut self, field: &str, key: &f64) -> Vec<Arc<Value>> {
+        self.remove_all_key_helper(
+            field,
+            &NotNaN::new(*key).expect("NaN value is not accepted"),
+        )
     }
 }
 

@@ -1,15 +1,13 @@
 use std::any::TypeId;
-use std::iter;
-use std::collections::range::RangeArgument;
+use std::ops::RangeBounds;
 use std::sync::{Arc, Condvar, Mutex};
 
-use serde::{Deserialize, Serialize};
-use ordered_float::NotNaN;
 use chashmap::{CHashMap, ReadGuard, WriteGuard};
+use serde::{Deserialize, Serialize};
+use serde_json::value::{from_value, to_value};
 
-use entry::TreeSpaceEntry;
-use entry::RangeEntry;
-use entry::ExactKeyEntry;
+use entry::helpers::{deflatten, flatten};
+use entry::{ExactKeyEntry, RangeEntry, TreeSpaceEntry};
 
 /// Basic interface of an ObjectSpace.
 ///
@@ -162,7 +160,7 @@ pub trait ObjectSpace {
 /// An extension of `ObjectSpace` supporting retrieving structs by range of a field.
 ///
 /// Given a type `T` with a field (might be nested) of type `U`,
-/// a path to a field of type `U` and a `RangeArgument<U>`,
+/// a path to a field of type `U` and a `RangeBounds<U>`,
 /// an `ObjectSpaceRange<U>` could retrieve structs of type `T`
 /// whose value of the specified field is within the given range.
 ///
@@ -196,7 +194,7 @@ pub trait ObjectSpaceRange<U>: ObjectSpace {
     fn try_read_range<T, R>(&self, field: &str, condition: R) -> Option<T>
     where
         for<'de> T: Serialize + Deserialize<'de> + 'static,
-        R: RangeArgument<U> + Clone;
+        R: RangeBounds<U> + Clone;
 
     /// Given a path to an element of the struct and a range of possible values,
     /// return copies of all structs whose specified element is within the range.
@@ -219,7 +217,7 @@ pub trait ObjectSpaceRange<U>: ObjectSpace {
     ) -> Box<Iterator<Item = T> + 'a>
     where
         for<'de> T: Deserialize<'de> + 'static,
-        R: RangeArgument<U> + Clone;
+        R: RangeBounds<U> + Clone;
 
     /// Given a path to an element of the struct and a range of possible values,
     /// return a copy of a struct whose specified element is within the range.
@@ -238,7 +236,7 @@ pub trait ObjectSpaceRange<U>: ObjectSpace {
     fn read_range<T, R>(&self, field: &str, condition: R) -> T
     where
         for<'de> T: Serialize + Deserialize<'de> + 'static,
-        R: RangeArgument<U> + Clone;
+        R: RangeBounds<U> + Clone;
 
     /// Given a path to an element of the struct and a range of possible values,
     /// remove and return a struct whose specified element is within the range.
@@ -259,7 +257,7 @@ pub trait ObjectSpaceRange<U>: ObjectSpace {
     fn try_take_range<T, R>(&self, field: &str, condition: R) -> Option<T>
     where
         for<'de> T: Serialize + Deserialize<'de> + 'static,
-        R: RangeArgument<U> + Clone;
+        R: RangeBounds<U> + Clone;
 
     /// Given a path to an element of the struct and a range of possible values,
     /// remove and return all structs whose specified element is within the range.
@@ -282,7 +280,7 @@ pub trait ObjectSpaceRange<U>: ObjectSpace {
     ) -> Box<Iterator<Item = T> + 'a>
     where
         for<'de> T: Deserialize<'de> + 'static,
-        R: RangeArgument<U> + Clone;
+        R: RangeBounds<U> + Clone;
 
     /// Given a path to an element of the struct and a range of possible values,
     /// remove and return a struct whose specified element is within the range.
@@ -302,7 +300,7 @@ pub trait ObjectSpaceRange<U>: ObjectSpace {
     fn take_range<T, R>(&self, field: &str, condition: R) -> T
     where
         for<'de> T: Serialize + Deserialize<'de> + 'static,
-        R: RangeArgument<U> + Clone;
+        R: RangeBounds<U> + Clone;
 }
 
 /// An extension of `ObjectSpace` supporting retrieving structs by value of a field.
@@ -452,6 +450,7 @@ type Lock = Arc<(Mutex<bool>, Condvar)>;
 /// and the `Vec` of structs containing the corresponding value of such field.
 ///
 /// `Mutex` is used sparingly to ensure blocking `read` and `take` calls do not hijack CPU cycles
+#[derive(Default)]
 pub struct TreeObjectSpace {
     typeid_entries_dict: CHashMap<TypeId, TreeSpaceEntry>,
     lock_dict: CHashMap<TypeId, Lock>,
@@ -459,10 +458,7 @@ pub struct TreeObjectSpace {
 
 impl TreeObjectSpace {
     pub fn new() -> TreeObjectSpace {
-        TreeObjectSpace {
-            typeid_entries_dict: CHashMap::new(),
-            lock_dict: CHashMap::new(),
-        }
+        Default::default()
     }
 
     fn get_object_entry_ref<T>(&self) -> Option<ReadGuard<TypeId, TreeSpaceEntry>>
@@ -507,9 +503,13 @@ impl ObjectSpace for TreeObjectSpace {
         let type_id = TypeId::of::<T>();
         self.add_entry(type_id);
         let &(ref lock, ref cvar) = &*self.get_lock::<T>().unwrap().clone();
+        let value = flatten(to_value(obj).expect("struct cannot be serialized"));
         let mut status = lock.lock().unwrap();
         *status = !*status;
-        self.typeid_entries_dict.get_mut(&type_id).unwrap().add(obj);
+        self.typeid_entries_dict
+            .get_mut(&type_id)
+            .unwrap()
+            .add(value);
         cvar.notify_all();
     }
 
@@ -517,8 +517,12 @@ impl ObjectSpace for TreeObjectSpace {
     where
         for<'de> T: Serialize + Deserialize<'de> + 'static,
     {
-        match self.get_object_entry_ref::<T>() {
-            Some(entry) => entry.get::<T>(),
+        let value = match self.get_object_entry_ref::<T>() {
+            Some(entry) => entry.get(),
+            _ => None,
+        };
+        match value {
+            Some(val) => from_value(deflatten(val)).ok(),
             _ => None,
         }
     }
@@ -527,10 +531,16 @@ impl ObjectSpace for TreeObjectSpace {
     where
         for<'de> T: Serialize + Deserialize<'de> + 'static,
     {
-        match self.get_object_entry_ref::<T>() {
-            Some(ent) => Box::new(ent.get_all::<T>().collect::<Vec<T>>().into_iter()),
-            None => Box::new(iter::empty::<T>()),
-        }
+        let val_iter: Vec<_> = match self.get_object_entry_ref::<T>() {
+            Some(ent) => ent.get_all().collect(),
+            None => Vec::new(),
+        };
+
+        Box::new(
+            val_iter
+                .into_iter()
+                .filter_map(|item| from_value(deflatten(item)).ok()),
+        )
     }
 
     fn read<T>(&self) -> T
@@ -539,24 +549,35 @@ impl ObjectSpace for TreeObjectSpace {
     {
         self.add_entry(TypeId::of::<T>());
         let &(ref lock, ref cvar) = &*self.get_lock::<T>().unwrap().clone();
-        let mut fetched = lock.lock().unwrap();
-
-        loop {
-            let result = self.try_read::<T>();
-            if let Some(item) = result {
-                return item;
+        let value;
+        {
+            let mut fetched = lock.lock().unwrap();
+            loop {
+                let result = match self.get_object_entry_ref::<T>() {
+                    Some(entry) => entry.get(),
+                    _ => None,
+                };
+                if let Some(item) = result {
+                    value = item;
+                    break;
+                }
+                fetched = cvar.wait(fetched).unwrap();
             }
-            fetched = cvar.wait(fetched).unwrap();
         }
+        from_value(deflatten(value)).unwrap()
     }
 
     fn try_take<T>(&self) -> Option<T>
     where
         for<'de> T: Serialize + Deserialize<'de> + 'static,
     {
-        match self.get_object_entry_mut::<T>() {
-            Some(mut ent) => ent.remove::<T>(),
-            None => None,
+        let value = match self.get_object_entry_mut::<T>() {
+            Some(mut entry) => entry.remove(),
+            _ => None,
+        };
+        match value {
+            Some(val) => from_value(deflatten(val)).ok(),
+            _ => None,
         }
     }
 
@@ -564,10 +585,16 @@ impl ObjectSpace for TreeObjectSpace {
     where
         for<'de> T: Serialize + Deserialize<'de> + 'static,
     {
-        match self.get_object_entry_mut::<T>() {
-            Some(mut entry) => Box::new(entry.remove_all::<T>().into_iter()),
-            None => Box::new(iter::empty::<T>()),
-        }
+        let val_iter = match self.get_object_entry_mut::<T>() {
+            Some(mut ent) => ent.remove_all(),
+            None => Vec::new(),
+        };
+
+        Box::new(
+            val_iter
+                .into_iter()
+                .filter_map(|item| from_value(deflatten(item)).ok()),
+        )
     }
 
     fn take<T>(&self) -> T
@@ -576,15 +603,22 @@ impl ObjectSpace for TreeObjectSpace {
     {
         self.add_entry(TypeId::of::<T>());
         let &(ref lock, ref cvar) = &*self.get_lock::<T>().unwrap().clone();
-        let mut fetched = lock.lock().unwrap();
-
-        loop {
-            let result = self.try_take::<T>();
-            if let Some(item) = result {
-                return item;
+        let value;
+        {
+            let mut fetched = lock.lock().unwrap();
+            loop {
+                let result = match self.get_object_entry_mut::<T>() {
+                    Some(mut entry) => entry.remove(),
+                    _ => None,
+                };
+                if let Some(item) = result {
+                    value = item;
+                    break;
+                }
+                fetched = cvar.wait(fetched).unwrap();
             }
-            fetched = cvar.wait(fetched).unwrap();
         }
+        from_value(deflatten(value)).unwrap()
     }
 }
 
@@ -595,10 +629,14 @@ macro_rules! object_range{
                 fn try_read_range<T, R>(&self, field: &str, condition: R) -> Option<T>
                 where
                     for<'de> T: Serialize + Deserialize<'de> + 'static,
-                    R: RangeArgument<$ty> + Clone,
+                    R: RangeBounds<$ty> + Clone,
                 {
-                    match self.get_object_entry_ref::<T>() {
-                        Some(entry) => entry.get_range::<T, _>(field, condition),
+                    let value = match self.get_object_entry_ref::<T>() {
+                        Some(entry) => entry.get_range::<_>(field, condition),
+                        _ => None,
+                    };
+                    match value {
+                        Some(val) => from_value(deflatten(val)).ok(),
                         _ => None,
                     }
                 }
@@ -606,43 +644,52 @@ macro_rules! object_range{
                 fn read_all_range<'a, T, R>(&'a self, field: &str, condition: R) -> Box<Iterator<Item = T> + 'a>
                 where
                     for<'de> T: Deserialize<'de> + 'static,
-                    R: RangeArgument<$ty> + Clone,
+                    R: RangeBounds<$ty> + Clone,
                 {
-                    match self.get_object_entry_ref::<T>() {
-                        Some(ent) => Box::new(
-                            ent.get_all_range::<T, _>(field, condition)
-                                .collect::<Vec<T>>()
-                                .into_iter(),
-                        ),
-                        None => Box::new(iter::empty::<T>()),
-                    }
+                    let val_iter: Vec<_> = match self.get_object_entry_ref::<T>() {
+                        Some(ent) => ent.get_all_range::<_>(field, condition).collect(),
+                        None => Vec::new(),
+                    };
+
+                    Box::new(val_iter.into_iter().filter_map(|item| from_value(deflatten(item)).ok()))
                 }
 
                 fn read_range<T, R>(&self, field: &str, condition: R) -> T
                 where
                     for<'de> T: Serialize + Deserialize<'de> + 'static,
-                    R: RangeArgument<$ty> + Clone,
+                    R: RangeBounds<$ty> + Clone,
                 {
                     self.add_entry(TypeId::of::<T>());
                     let &(ref lock, ref cvar) = &*self.get_lock::<T>().unwrap().clone();
-                    let mut fetched = lock.lock().unwrap();
-
-                    loop {
-                        let result = self.try_read_range::<T, _>(field, condition.clone());
-                        if let Some(item) = result {
-                            return item;
+                    let value;
+                    {
+                        let mut fetched = lock.lock().unwrap();
+                        loop {
+                            let result = match self.get_object_entry_ref::<T>() {
+                                Some(entry) => entry.get_range::<_>(field, condition.clone()),
+                                _ => None,
+                            };
+                            if let Some(item) = result {
+                                value = item;
+                                break;
+                            }
+                            fetched = cvar.wait(fetched).unwrap();
                         }
-                        fetched = cvar.wait(fetched).unwrap();
                     }
+                    from_value(deflatten(value)).unwrap()
                 }
 
                 fn try_take_range<T, R>(&self, field: &str, condition: R) -> Option<T>
                 where
                     for<'de> T: Serialize + Deserialize<'de> + 'static,
-                    R: RangeArgument<$ty> + Clone,
+                    R: RangeBounds<$ty> + Clone,
                 {
-                    match self.get_object_entry_mut::<T>() {
-                        Some(mut entry) => entry.remove_range::<T, _>(field, condition),
+                    let value = match self.get_object_entry_mut::<T>() {
+                        Some(mut entry) => entry.remove_range::<_>(field, condition),
+                        _ => None,
+                    };
+                    match value {
+                        Some(val) => from_value(deflatten(val)).ok(),
                         _ => None,
                     }
                 }
@@ -654,30 +701,43 @@ macro_rules! object_range{
                 ) -> Box<Iterator<Item = T> + 'a>
                 where
                     for<'de> T: Deserialize<'de> + 'static,
-                    R: RangeArgument<$ty> + Clone,
+                    R: RangeBounds<$ty> + Clone,
                 {
-                    match self.get_object_entry_mut::<T>() {
-                        Some(mut ent) => Box::new(ent.remove_all_range::<T, _>(field, condition).into_iter()),
-                        None => Box::new(iter::empty::<T>()),
-                    }
+                    let val_iter = match self.get_object_entry_mut::<T>() {
+                        Some(mut ent) => ent.remove_all_range::<_>(field, condition),
+                        None => Vec::new(),
+                    };
+
+                    Box::new(
+                        val_iter
+                            .into_iter()
+                            .filter_map(|item| from_value(deflatten(item)).ok())
+                    )
                 }
 
                 fn take_range<T, R>(&self, field: &str, condition: R) -> T
                 where
                     for<'de> T: Serialize + Deserialize<'de> + 'static,
-                    R: RangeArgument<$ty> + Clone,
+                    R: RangeBounds<$ty> + Clone,
                 {
                     self.add_entry(TypeId::of::<T>());
                     let &(ref lock, ref cvar) = &*self.get_lock::<T>().unwrap().clone();
-                    let mut fetched = lock.lock().unwrap();
-
-                    loop {
-                        let result = self.try_take_range::<T, _>(field, condition.clone());
-                        if let Some(item) = result {
-                            return item;
+                    let value;
+                    {
+                        let mut fetched = lock.lock().unwrap();
+                        loop {
+                            let result = match self.get_object_entry_mut::<T>() {
+                                Some(mut entry) => entry.remove_range::<_>(field, condition.clone()),
+                                _ => None,
+                            };
+                            if let Some(item) = result {
+                                value = item;
+                                break;
+                            }
+                            fetched = cvar.wait(fetched).unwrap();
                         }
-                        fetched = cvar.wait(fetched).unwrap();
                     }
+                    from_value(deflatten(value)).unwrap()
                 }
             }
         )*
@@ -692,8 +752,12 @@ macro_rules! object_key{
                 where
                     for<'de> T: Serialize + Deserialize<'de> + 'static,
                 {
-                    match self.get_object_entry_ref::<T>() {
-                        Some(entry) => entry.get_key::<T>(field, condition),
+                    let value = match self.get_object_entry_ref::<T>() {
+                        Some(entry) => entry.get_key(field, condition),
+                        _ => None,
+                    };
+                    match value {
+                        Some(val) => from_value(deflatten(val)).ok(),
                         _ => None,
                     }
                 }
@@ -702,10 +766,12 @@ macro_rules! object_key{
                 where
                     for<'de> T: Deserialize<'de> + 'static,
                 {
-                    match self.get_object_entry_ref::<T>() {
-                        Some(ent) => Box::new(ent.get_all_key::<T>(field, condition).collect::<Vec<T>>().into_iter()),
-                        None => Box::new(iter::empty::<T>()),
-                    }
+                    let val_iter: Vec<_> = match self.get_object_entry_ref::<T>() {
+                        Some(ent) => ent.get_all_key(field, condition).collect(),
+                        None => Vec::new(),
+                    };
+
+                    Box::new(val_iter.into_iter().filter_map(|item| from_value(deflatten(item)).ok()))
                 }
 
                 fn read_key<T>(&self, field: &str, condition: &$ty) -> T
@@ -714,23 +780,34 @@ macro_rules! object_key{
                 {
                     self.add_entry(TypeId::of::<T>());
                     let &(ref lock, ref cvar) = &*self.get_lock::<T>().unwrap().clone();
-                    let mut fetched = lock.lock().unwrap();
-
-                    loop {
-                        let result = self.try_read_key::<T>(field, condition);
-                        if let Some(item) = result {
-                            return item;
+                    let value;
+                    {
+                        let mut fetched = lock.lock().unwrap();
+                        loop {
+                            let result = match self.get_object_entry_ref::<T>() {
+                                Some(entry) => entry.get_key(field, condition),
+                                _ => None,
+                            };
+                            if let Some(item) = result {
+                                value = item;
+                                break;
+                            }
+                            fetched = cvar.wait(fetched).unwrap();
                         }
-                        fetched = cvar.wait(fetched).unwrap();
                     }
+                    from_value(deflatten(value)).unwrap()
                 }
 
                 fn try_take_key<T>(&self, field: &str, condition: &$ty) -> Option<T>
                 where
                     for<'de> T: Serialize + Deserialize<'de> + 'static,
                 {
-                    match self.get_object_entry_mut::<T>() {
-                        Some(mut entry) => entry.remove_key::<T>(field, condition),
+                    let value = match self.get_object_entry_mut::<T>() {
+                        Some(mut entry) => entry.remove_key(field, condition),
+                        _ => None,
+                    };
+                    match value {
+                        Some(val) => from_value(deflatten(val)).ok(),
                         _ => None,
                     }
                 }
@@ -743,10 +820,16 @@ macro_rules! object_key{
                 where
                     for<'de> T: Deserialize<'de> + 'static,
                 {
-                    match self.get_object_entry_mut::<T>() {
-                        Some(mut ent) => Box::new(ent.remove_all_key::<T>(field, condition).into_iter()),
-                        None => Box::new(iter::empty::<T>()),
-                    }
+                    let val_iter = match self.get_object_entry_mut::<T>() {
+                        Some(mut ent) => ent.remove_all_key(field, condition),
+                        None => Vec::new(),
+                    };
+
+                    Box::new(
+                        val_iter
+                            .into_iter()
+                            .filter_map(|item| from_value(deflatten(item)).ok())
+                    )
                 }
 
                 fn take_key<T>(&self, field: &str, condition: &$ty) -> T
@@ -755,36 +838,44 @@ macro_rules! object_key{
                 {
                     self.add_entry(TypeId::of::<T>());
                     let &(ref lock, ref cvar) = &*self.get_lock::<T>().unwrap().clone();
-                    let mut fetched = lock.lock().unwrap();
-
-                    loop {
-                        let result = self.try_take_key::<T>(field, condition);
-                        if let Some(item) = result {
-                            return item;
+                    let value;
+                    {
+                        let mut fetched = lock.lock().unwrap();
+                        loop {
+                            let result = match self.get_object_entry_mut::<T>() {
+                                Some(mut entry) => entry.remove_key(field, condition),
+                                _ => None,
+                            };
+                            if let Some(item) = result {
+                                value = item;
+                                break;
+                            }
+                            fetched = cvar.wait(fetched).unwrap();
                         }
-                        fetched = cvar.wait(fetched).unwrap();
                     }
+                    from_value(deflatten(value)).unwrap()
                 }
             }
         )*
     };
 }
 
-object_range!{i64 String}
-object_key!{i64 String bool /*NotNaN<f64>*/}
+object_range!{i64 String f64}
+object_key!{i64 String bool f64}
 
 mod tests {
     use super::*;
 
-    #[derive(Serialize, Deserialize, PartialEq, Eq, Debug)]
+    #[derive(Serialize, Deserialize, PartialEq, Debug)]
     struct TestStruct {
         count: i32,
         name: String,
     }
 
-    #[derive(Serialize, Deserialize, PartialEq, Eq, Debug)]
+    #[derive(Serialize, Deserialize, PartialEq, Debug)]
     struct CompoundStruct {
         person: TestStruct,
+        gpa: f64,
     }
 
     #[test]
@@ -801,6 +892,7 @@ mod tests {
                 count: 3,
                 name: String::from("Tuan"),
             },
+            gpa: 3.0,
         });
 
         assert_eq!(
@@ -824,6 +916,7 @@ mod tests {
                     count: 3,
                     name: String::from("Tuan"),
                 },
+                gpa: 3.0
             })
         );
         assert!(space.try_read::<CompoundStruct>().is_some());
@@ -843,6 +936,7 @@ mod tests {
                 count: 3,
                 name: String::from("Tuan"),
             },
+            gpa: 3.5,
         });
 
         assert_eq!(
@@ -867,6 +961,7 @@ mod tests {
                     count: 3,
                     name: String::from("Tuan"),
                 },
+                gpa: 3.5
             })
         );
         assert!(space.try_take::<CompoundStruct>().is_none());
@@ -956,12 +1051,14 @@ mod tests {
                 count: 5,
                 name: String::from("Duane"),
             },
+            gpa: 3.0,
         });
         space.write(CompoundStruct {
             person: TestStruct {
                 count: 3,
                 name: String::from("Tuan"),
             },
+            gpa: 3.5,
         });
 
         assert_eq!(
@@ -971,6 +1068,7 @@ mod tests {
                     count: 3,
                     name: String::from("Tuan"),
                 },
+                gpa: 3.5
             })
         );
         assert!(
@@ -1016,21 +1114,24 @@ mod tests {
                 count: 3,
                 name: String::from("Tuan"),
             },
+            gpa: 3.0,
         });
         space.write(CompoundStruct {
             person: TestStruct {
                 count: 5,
                 name: String::from("Duane"),
             },
+            gpa: 3.5,
         });
 
         assert_eq!(
-            space.try_take_range::<CompoundStruct, _>("person.count", 2..4),
+            space.try_take_range::<CompoundStruct, _>("gpa", 3.0..3.5),
             Some(CompoundStruct {
                 person: TestStruct {
                     count: 3,
                     name: String::from("Tuan"),
                 },
+                gpa: 3.0
             })
         );
         assert!(
@@ -1076,23 +1177,26 @@ mod tests {
                 count: 5,
                 name: String::from("Duane"),
             },
+            gpa: 4.0,
         });
         space.write(CompoundStruct {
             person: TestStruct {
                 count: 3,
                 name: String::from("Tuan"),
             },
+            gpa: 3.0,
         });
         space.write(CompoundStruct {
             person: TestStruct {
                 count: 3,
                 name: String::from("Minh"),
             },
+            gpa: 3.0,
         });
 
         assert_eq!(
             space
-                .read_all_range::<CompoundStruct, _>("person.count", 2..4)
+                .read_all_range::<CompoundStruct, _>("gpa", 2.5..4.0)
                 .count(),
             2
         );
@@ -1144,23 +1248,26 @@ mod tests {
                 count: 5,
                 name: String::from("Duane"),
             },
+            gpa: 3.5,
         });
         space.write(CompoundStruct {
             person: TestStruct {
                 count: 3,
                 name: String::from("Tuan"),
             },
+            gpa: 3.0,
         });
         space.write(CompoundStruct {
             person: TestStruct {
                 count: 3,
                 name: String::from("Minh"),
             },
+            gpa: 3.0,
         });
 
         assert_eq!(
             space
-                .take_all_range::<CompoundStruct, _>("person.count", 2..4)
+                .take_all_range::<CompoundStruct, _>("gpa", 2.5..3.5)
                 .count(),
             2
         );
@@ -1172,7 +1279,7 @@ mod tests {
         );
         assert_eq!(
             space
-                .take_all_range::<CompoundStruct, _>("person.count", 4..)
+                .take_all_range::<CompoundStruct, _>("gpa", 3.5..)
                 .count(),
             1
         );
@@ -1211,12 +1318,14 @@ mod tests {
                 count: 5,
                 name: String::from("Duane"),
             },
+            gpa: 4.0,
         });
         space.write(CompoundStruct {
             person: TestStruct {
                 count: 3,
                 name: String::from("Tuan"),
             },
+            gpa: 3.0,
         });
 
         assert_eq!(
@@ -1226,13 +1335,10 @@ mod tests {
                     count: 3,
                     name: String::from("Tuan"),
                 },
+                gpa: 3.0
             })
         );
-        assert!(
-            space
-                .try_read_key::<CompoundStruct>("person.count", &3)
-                .is_some()
-        );
+        assert!(space.try_read_key::<CompoundStruct>("gpa", &3.0).is_some());
     }
 
     #[test]
@@ -1263,6 +1369,7 @@ mod tests {
                 count: 3,
                 name: String::from("Tuan"),
             },
+            gpa: 3.0,
         });
 
         assert_eq!(
@@ -1272,13 +1379,10 @@ mod tests {
                     count: 3,
                     name: String::from("Tuan"),
                 },
+                gpa: 3.0
             })
         );
-        assert!(
-            space
-                .try_take_key::<CompoundStruct>("person.count", &3)
-                .is_none()
-        );
+        assert!(space.try_take_key::<CompoundStruct>("gpa", &3.0).is_none());
     }
 
     #[test]
@@ -1311,18 +1415,21 @@ mod tests {
                 count: 5,
                 name: String::from("Duane"),
             },
+            gpa: 4.0,
         });
         space.write(CompoundStruct {
             person: TestStruct {
                 count: 3,
                 name: String::from("Tuan"),
             },
+            gpa: 3.0,
         });
         space.write(CompoundStruct {
             person: TestStruct {
                 count: 3,
                 name: String::from("Minh"),
             },
+            gpa: 3.5,
         });
 
         assert_eq!(
@@ -1337,12 +1444,7 @@ mod tests {
                 .count(),
             0
         );
-        assert_eq!(
-            space
-                .read_all_key::<CompoundStruct>("person.count", &5)
-                .count(),
-            1
-        );
+        assert_eq!(space.read_all_key::<CompoundStruct>("gpa", &4.0).count(), 1);
     }
 
     #[test]
@@ -1376,26 +1478,24 @@ mod tests {
                 count: 5,
                 name: String::from("Duane"),
             },
+            gpa: 4.0,
         });
         space.write(CompoundStruct {
             person: TestStruct {
                 count: 3,
                 name: String::from("Tuan"),
             },
+            gpa: 3.0,
         });
         space.write(CompoundStruct {
             person: TestStruct {
                 count: 3,
                 name: String::from("Minh"),
             },
+            gpa: 3.0,
         });
 
-        assert_eq!(
-            space
-                .take_all_key::<CompoundStruct>("person.count", &3)
-                .count(),
-            2
-        );
+        assert_eq!(space.take_all_key::<CompoundStruct>("gpa", &3.0).count(), 2);
         assert_eq!(
             space
                 .take_all_key::<CompoundStruct>("person.count", &3)

@@ -1,582 +1,535 @@
-use std::iter::empty;
-use std::sync::Arc;
 use std::borrow::Borrow;
 use std::iter::IntoIterator;
-use std::collections::range::RangeArgument;
+use std::iter::empty;
+use std::ops::RangeBounds;
+use std::sync::Arc;
 
-use serde_json::value::{from_value, Value};
-use serde::ser::Serialize;
-use serde::de::Deserialize;
 use ordered_float::NotNaN;
+use serde_json::value::Value;
 
-use entry::helpers::{deflatten, get_all_prims_range};
 use entry::TreeSpaceEntry;
+use entry::helpers::{convert_float_range, get_all_prims_range, get_primitive_range,
+                     remove_all_prims_range, remove_primitive_range, remove_value_arc};
 
 pub trait RangeEntry<U> {
-    fn get_range<T, R>(&self, field: &str, condition: R) -> Option<T>
+    fn get_range<R>(&self, field: &str, condition: R) -> Option<Value>
     where
-        for<'de> T: Serialize + Deserialize<'de>,
-        R: RangeArgument<U>;
+        R: RangeBounds<U>;
 
-    fn get_all_range<'a, T, R>(&'a self, field: &str, condition: R) -> Box<Iterator<Item = T> + 'a>
+    fn get_all_range<'a, R>(
+        &'a self,
+        field: &str,
+        condition: R,
+    ) -> Box<Iterator<Item = Value> + 'a>
     where
-        for<'de> T: Deserialize<'de> + 'static,
-        R: RangeArgument<U>;
+        R: RangeBounds<U>;
 
-    fn remove_range<T, R>(&mut self, field: &str, condition: R) -> Option<T>
+    fn remove_range<R>(&mut self, field: &str, condition: R) -> Option<Value>
     where
-        for<'de> T: Serialize + Deserialize<'de>,
-        R: RangeArgument<U>;
+        R: RangeBounds<U>;
 
-    fn remove_all_range<'a, T, R>(&'a mut self, field: &str, condition: R) -> Vec<T>
+    fn remove_all_range<'a, R>(&'a mut self, field: &str, condition: R) -> Vec<Value>
     where
-        for<'de> T: Deserialize<'de> + 'static,
-        R: RangeArgument<U>;
+        R: RangeBounds<U>;
 }
 
-impl RangeEntry<i64> for TreeSpaceEntry {
-    fn get_range<T, R>(&self, field: &str, condition: R) -> Option<T>
-    where
-        for<'de> T: Serialize + Deserialize<'de>,
-        R: RangeArgument<i64>,
-    {
-        match self.get_int_range_helper(field, condition) {
-            Some(arc) => {
-                let val: &Value = arc.borrow();
-                from_value(deflatten(val.clone())).ok()
+macro_rules! impl_range_entry {
+    ($($ty:ty)*) => {
+        $(
+            impl RangeEntry<$ty> for TreeSpaceEntry {
+                fn get_range<R>(&self, field: &str, condition: R) -> Option<Value>
+                where
+                    R: RangeBounds<$ty>,
+                {
+                    match self.get_range_helper(field, condition) {
+                        Some(arc) => {
+                            let val: &Value = arc.borrow();
+                            Some(val.clone())
+                        }
+                        None => None,
+                    }
+                }
+
+                fn get_all_range<'a, R>(&'a self, field: &str, condition: R) -> Box<Iterator<Item = Value> + 'a>
+                where
+                    R: RangeBounds<$ty>,
+                {
+                    self.get_all_range_helper(field, condition)
+                }
+
+                fn remove_range<R>(&mut self, field: &str, condition: R) -> Option<Value>
+                where
+                    R: RangeBounds<$ty>,
+                {
+                    match self.remove_range_helper(field, condition) {
+                        Some(arc) => Arc::try_unwrap(arc).ok(),
+                        None => None,
+                    }
+                }
+
+                fn remove_all_range<'a, R>(&'a mut self, field: &str, condition: R) -> Vec<Value>
+                where
+                    R: RangeBounds<$ty>,
+                {
+                    self.remove_all_range_helper(field, condition)
+                        .into_iter()
+                        .filter_map(|arc| Arc::try_unwrap(arc).ok())
+                        .collect()
+                }
             }
-            None => None,
-        }
-    }
-
-    fn get_all_range<'a, T, R>(&'a self, field: &str, condition: R) -> Box<Iterator<Item = T> + 'a>
-    where
-        for<'de> T: Deserialize<'de> + 'static,
-        R: RangeArgument<i64>,
-    {
-        match *self {
-            TreeSpaceEntry::Null => Box::new(empty()),
-            TreeSpaceEntry::IntLeaf(ref int_map) => get_all_prims_range(int_map, condition),
-            TreeSpaceEntry::Branch(ref field_map) => match field_map.get(field) {
-                Some(entry) => entry.get_all_range("", condition),
-                None => panic!("No such field found!"),
-            },
-            _ => panic!("Not an int type or a struct holding an int"),
-        }
-    }
-
-    fn remove_range<T, R>(&mut self, field: &str, condition: R) -> Option<T>
-    where
-        for<'de> T: Serialize + Deserialize<'de>,
-        R: RangeArgument<i64>,
-    {
-        match self.remove_int_range(field, condition) {
-            Some(arc) => match Arc::try_unwrap(arc) {
-                Ok(value) => from_value(deflatten(value)).ok(),
-                Err(_) => None,
-            },
-            None => None,
-        }
-    }
-
-    fn remove_all_range<'a, T, R>(&'a mut self, field: &str, condition: R) -> Vec<T>
-    where
-        for<'de> T: Deserialize<'de> + 'static,
-        R: RangeArgument<i64>,
-    {
-        self.remove_all_int_range(field, condition)
-            .into_iter()
-            .filter_map(|arc| match Arc::try_unwrap(arc) {
-                Ok(value) => from_value(deflatten(value)).ok(),
-                Err(_) => None,
-            })
-            .collect()
-    }
+        )*
+    };
 }
 
-impl RangeEntry<String> for TreeSpaceEntry {
-    fn get_range<T, R>(&self, field: &str, condition: R) -> Option<T>
+impl_range_entry!{i64 String f64}
+
+trait RangeValueCollection<T> {
+    fn get_range_helper<R>(&self, field: &str, condition: R) -> Option<Arc<Value>>
     where
-        for<'de> T: Serialize + Deserialize<'de>,
-        R: RangeArgument<String>,
-    {
-        match self.get_string_range_helper(field, condition) {
-            Some(arc) => {
-                let val: &Value = arc.borrow();
-                from_value(deflatten(val.clone())).ok()
+        R: RangeBounds<T>;
+
+    fn get_all_range_helper<'a, R>(
+        &'a self,
+        field: &str,
+        condition: R,
+    ) -> Box<Iterator<Item = Value> + 'a>
+    where
+        R: RangeBounds<T>;
+
+    fn remove_range_helper<R>(&mut self, field: &str, condition: R) -> Option<Arc<Value>>
+    where
+        R: RangeBounds<T>;
+
+    fn remove_all_range_helper<R>(&mut self, field: &str, condition: R) -> Vec<Arc<Value>>
+    where
+        R: RangeBounds<T>;
+}
+
+macro_rules! impl_range_val_collection {
+    ($([$path:ident, $ty:ty])*) => {
+        $(
+            impl RangeValueCollection<$ty> for TreeSpaceEntry {
+
+                fn get_range_helper<R>(&self, field: &str, condition: R) -> Option<Arc<Value>>
+                where
+                    R: RangeBounds<$ty>,
+                {
+                    match *self {
+                        TreeSpaceEntry::Null => None,
+                        TreeSpaceEntry::$path(ref map) => get_primitive_range(map, condition),
+                        TreeSpaceEntry::Branch(ref field_map) => match field_map.get(field) {
+                            Some(entry) => entry.get_range_helper("", condition),
+                            None => panic!("No such field found!"),
+                        },
+                        _ => panic!("Not correct type"),
+                    }
+                }
+
+                fn get_all_range_helper<'a, R>(&'a self, field: &str, condition: R) -> Box<Iterator<Item = Value> + 'a>
+                where
+                    R: RangeBounds<$ty>,
+                {
+                    match *self {
+                        TreeSpaceEntry::Null => Box::new(empty()),
+                        TreeSpaceEntry::$path(ref map) => {
+                            get_all_prims_range(map, condition)
+                        }
+                        TreeSpaceEntry::Branch(ref field_map) => match field_map.get(field) {
+                            Some(entry) => entry.get_all_range_helper("", condition),
+                            None => panic!("No such field found!"),
+                        },
+                        _ => panic!("Not an int type or a struct holding an int"),
+                    }
+                }
+
+                fn remove_range_helper<R>(&mut self, field: &str, condition: R) -> Option<Arc<Value>>
+                where
+                    R: RangeBounds<$ty>,
+                {
+                    match *self {
+                        TreeSpaceEntry::Null => None,
+                        TreeSpaceEntry::$path(ref mut map) => remove_primitive_range(map, condition),
+                        TreeSpaceEntry::Branch(ref mut object_field_map) => {
+                            let arc = match object_field_map.get_mut(field) {
+                                None => panic!("Field {} does not exist", field),
+                                Some(entry) => entry.remove_range_helper(field, condition),
+                            };
+
+                            match arc {
+                                Some(arc) => {
+                                    remove_value_arc(object_field_map, &arc);
+                                    Some(arc)
+                                }
+                                None => None,
+                            }
+                        }
+                        _ => panic!("Not correct type"),
+                    }
+                }
+
+                fn remove_all_range_helper<R>(&mut self, field: &str, condition: R) -> Vec<Arc<Value>>
+                where
+                    R: RangeBounds<$ty>,
+                {
+                    match *self {
+                        TreeSpaceEntry::Null => Vec::new(),
+                        TreeSpaceEntry::$path(ref mut map) => remove_all_prims_range(map, condition),
+                        TreeSpaceEntry::Branch(ref mut field_map) => {
+                            let arc_list = match field_map.get_mut(field) {
+                                None => panic!("Field {} does not exist", field),
+                                Some(entry) => entry.remove_all_range_helper(field, condition),
+                            };
+
+                            for arc in &arc_list {
+                                remove_value_arc(field_map, arc);
+                            }
+                            arc_list
+                        }
+                        _ => panic!("Not correct type"),
+                    }
+                }
             }
-            None => None,
-        }
+        )*
+    };
+}
+
+impl_range_val_collection!{[IntLeaf, i64] [StringLeaf, String] [FloatLeaf, NotNaN<f64>]}
+
+impl RangeValueCollection<f64> for TreeSpaceEntry {
+    fn get_range_helper<R>(&self, field: &str, condition: R) -> Option<Arc<Value>>
+    where
+        R: RangeBounds<f64>,
+    {
+        self.get_range_helper(field, convert_float_range(condition))
     }
 
-    fn get_all_range<'a, T, R>(&'a self, field: &str, condition: R) -> Box<Iterator<Item = T> + 'a>
+    fn get_all_range_helper<'a, R>(
+        &'a self,
+        field: &str,
+        condition: R,
+    ) -> Box<Iterator<Item = Value> + 'a>
     where
-        for<'de> T: Deserialize<'de> + 'static,
-        R: RangeArgument<String>,
+        R: RangeBounds<f64>,
     {
-        match *self {
-            TreeSpaceEntry::Null => Box::new(empty()),
-            TreeSpaceEntry::StringLeaf(ref string_map) => {
-                get_all_prims_range(string_map, condition)
-            }
-            TreeSpaceEntry::Branch(ref field_map) => match field_map.get(field) {
-                Some(entry) => entry.get_all_range("", condition),
-                None => panic!("No such field found!"),
-            },
-            _ => panic!("Not an int type or a struct holding an int"),
-        }
+        self.get_all_range_helper(field, convert_float_range(condition))
     }
 
-    fn remove_range<T, R>(&mut self, field: &str, condition: R) -> Option<T>
+    fn remove_range_helper<R>(&mut self, field: &str, condition: R) -> Option<Arc<Value>>
     where
-        for<'de> T: Serialize + Deserialize<'de>,
-        R: RangeArgument<String>,
+        R: RangeBounds<f64>,
     {
-        match self.remove_string_range(field, condition) {
-            Some(arc) => match Arc::try_unwrap(arc) {
-                Ok(value) => from_value(deflatten(value)).ok(),
-                Err(_) => None,
-            },
-            None => None,
-        }
+        self.remove_range_helper(field, convert_float_range(condition))
     }
 
-    fn remove_all_range<'a, T, R>(&'a mut self, field: &str, condition: R) -> Vec<T>
+    fn remove_all_range_helper<R>(&mut self, field: &str, condition: R) -> Vec<Arc<Value>>
     where
-        for<'de> T: Deserialize<'de> + 'static,
-        R: RangeArgument<String>,
+        R: RangeBounds<f64>,
     {
-        self.remove_all_string_range(field, condition)
-            .into_iter()
-            .filter_map(|arc| match Arc::try_unwrap(arc) {
-                Ok(value) => from_value(deflatten(value)).ok(),
-                Err(_) => None,
-            })
-            .collect()
+        self.remove_all_range_helper(field, convert_float_range(condition))
     }
 }
 
-impl RangeEntry<bool> for TreeSpaceEntry {
-    fn get_range<T, R>(&self, field: &str, condition: R) -> Option<T>
-    where
-        for<'de> T: Serialize + Deserialize<'de>,
-        R: RangeArgument<bool>,
-    {
-        match self.get_bool_range_helper(field, condition) {
-            Some(arc) => {
-                let val: &Value = arc.borrow();
-                from_value(deflatten(val.clone())).ok()
-            }
-            None => None,
-        }
-    }
+// #[cfg(test)]
+// mod tests {
+//     use super::*;
 
-    fn get_all_range<'a, T, R>(&'a self, field: &str, condition: R) -> Box<Iterator<Item = T> + 'a>
-    where
-        for<'de> T: Deserialize<'de> + 'static,
-        R: RangeArgument<bool>,
-    {
-        match *self {
-            TreeSpaceEntry::Null => Box::new(empty()),
-            TreeSpaceEntry::BoolLeaf(ref bool_map) => get_all_prims_range(bool_map, condition),
-            TreeSpaceEntry::Branch(ref field_map) => match field_map.get(field) {
-                Some(entry) => entry.get_all_range("", condition),
-                None => panic!("No such field found!"),
-            },
-            _ => panic!("Not an int type or a struct holding an int"),
-        }
-    }
+//     #[derive(Serialize, Deserialize, PartialEq, Eq, Debug)]
+//     struct TestStruct {
+//         count: i32,
+//         name: String,
+//     }
 
-    fn remove_range<T, R>(&mut self, field: &str, condition: R) -> Option<T>
-    where
-        for<'de> T: Serialize + Deserialize<'de>,
-        R: RangeArgument<bool>,
-    {
-        match self.remove_bool_range(field, condition) {
-            Some(arc) => match Arc::try_unwrap(arc) {
-                Ok(value) => from_value(deflatten(value)).ok(),
-                Err(_) => None,
-            },
-            None => None,
-        }
-    }
+//     #[derive(Serialize, Deserialize, PartialEq, Debug)]
+//     struct CompoundStruct {
+//         person: TestStruct,
+//         gpa: f64,
+//     }
 
-    fn remove_all_range<'a, T, R>(&'a mut self, field: &str, condition: R) -> Vec<T>
-    where
-        for<'de> T: Deserialize<'de> + 'static,
-        R: RangeArgument<bool>,
-    {
-        self.remove_all_bool_range(field, condition)
-            .into_iter()
-            .filter_map(|arc| match Arc::try_unwrap(arc) {
-                Ok(value) => from_value(deflatten(value)).ok(),
-                Err(_) => None,
-            })
-            .collect()
-    }
-}
+//     #[test]
+//     fn get_range() {
+//         let mut int_entry = TreeSpaceEntry::new();
+//         assert_eq!(int_entry.get_range::<i64, _>("", 2..4), None);
+//         int_entry.add(3);
+//         int_entry.add(5);
+//         assert_eq!(int_entry.get_range::<i64, _>("", 2..4), Some(3));
+//         assert_ne!(int_entry.get_range::<i64, _>("", 2..4), None);
 
-impl RangeEntry<NotNaN<f64>> for TreeSpaceEntry {
-    fn get_range<T, R>(&self, field: &str, condition: R) -> Option<T>
-    where
-        for<'de> T: Serialize + Deserialize<'de>,
-        R: RangeArgument<NotNaN<f64>>,
-    {
-        match self.get_float_range_helper(field, condition) {
-            Some(arc) => {
-                let val: &Value = arc.borrow();
-                from_value(deflatten(val.clone())).ok()
-            }
-            None => None,
-        }
-    }
+//         let mut test_struct_entry = TreeSpaceEntry::new();
+//         test_struct_entry.add(TestStruct {
+//             count: 3,
+//             name: String::from("Tuan"),
+//         });
+//         test_struct_entry.add(TestStruct {
+//             count: 5,
+//             name: String::from("Duane"),
+//         });
 
-    fn get_all_range<'a, T, R>(&'a self, field: &str, condition: R) -> Box<Iterator<Item = T> + 'a>
-    where
-        for<'de> T: Deserialize<'de> + 'static,
-        R: RangeArgument<NotNaN<f64>>,
-    {
-        match *self {
-            TreeSpaceEntry::Null => Box::new(empty()),
-            TreeSpaceEntry::FloatLeaf(ref float_map) => get_all_prims_range(float_map, condition),
-            TreeSpaceEntry::Branch(ref field_map) => match field_map.get(field) {
-                Some(entry) => entry.get_all_range("", condition),
-                None => panic!("No such field found!"),
-            },
-            _ => panic!("Not an int type or a struct holding an int"),
-        }
-    }
+//         assert_eq!(
+//             test_struct_entry.get_range::<TestStruct, _>("count", 2..4),
+//             Some(TestStruct {
+//                 count: 3,
+//                 name: String::from("Tuan"),
+//             })
+//         );
+//         assert!(
+//             test_struct_entry
+//                 .get_range::<TestStruct, _>("count", 2..4)
+//                 .is_some()
+//         );
 
-    fn remove_range<T, R>(&mut self, field: &str, condition: R) -> Option<T>
-    where
-        for<'de> T: Serialize + Deserialize<'de>,
-        R: RangeArgument<NotNaN<f64>>,
-    {
-        match self.remove_float_range(field, condition) {
-            Some(arc) => match Arc::try_unwrap(arc) {
-                Ok(value) => from_value(deflatten(value)).ok(),
-                Err(_) => None,
-            },
-            None => None,
-        }
-    }
+//         let mut compound_struct_entry = TreeSpaceEntry::new();
+//         compound_struct_entry.add(CompoundStruct {
+//             person: TestStruct {
+//                 count: 5,
+//                 name: String::from("Duane"),
+//             },
+//             gpa: 3.5,
+//         });
+//         compound_struct_entry.add(CompoundStruct {
+//             person: TestStruct {
+//                 count: 3,
+//                 name: String::from("Tuan"),
+//             },
+//             gpa: 3.0,
+//         });
 
-    fn remove_all_range<'a, T, R>(&'a mut self, field: &str, condition: R) -> Vec<T>
-    where
-        for<'de> T: Deserialize<'de> + 'static,
-        R: RangeArgument<NotNaN<f64>>,
-    {
-        self.remove_all_float_range(field, condition)
-            .into_iter()
-            .filter_map(|arc| match Arc::try_unwrap(arc) {
-                Ok(value) => from_value(deflatten(value)).ok(),
-                Err(_) => None,
-            })
-            .collect()
-    }
-}
+//         assert_eq!(
+//             compound_struct_entry.get_range::<CompoundStruct, _>("person.count", 2..4),
+//             Some(CompoundStruct {
+//                 person: TestStruct {
+//                     count: 3,
+//                     name: String::from("Tuan"),
+//                 },
+//                 gpa: 3.0,
+//             })
+//         );
+//         assert!(
+//             compound_struct_entry
+//                 .get_range::<CompoundStruct, _>("person.count", 2..4)
+//                 .is_some()
+//         );
+//     }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+//     #[test]
+//     fn remove_range() {
+//         let mut int_entry = TreeSpaceEntry::new();
+//         assert_eq!(int_entry.remove_range::<i64, _>("", 2..4), None);
+//         int_entry.add(3);
+//         int_entry.add(5);
+//         assert_eq!(int_entry.remove_range::<i64, _>("", 2..4), Some(3));
+//         assert_eq!(int_entry.remove_range::<i64, _>("", 2..4), None);
 
-    #[derive(Serialize, Deserialize, PartialEq, Eq, Debug)]
-    struct TestStruct {
-        count: i32,
-        name: String,
-    }
+//         let mut test_struct_entry = TreeSpaceEntry::new();
+//         test_struct_entry.add(TestStruct {
+//             count: 3,
+//             name: String::from("Tuan"),
+//         });
+//         test_struct_entry.add(TestStruct {
+//             count: 5,
+//             name: String::from("Duane"),
+//         });
 
-    #[derive(Serialize, Deserialize, PartialEq, Debug)]
-    struct CompoundStruct {
-        person: TestStruct,
-        gpa: f64,
-    }
+//         assert_eq!(
+//             test_struct_entry.remove_range::<TestStruct, _>("count", 2..4),
+//             Some(TestStruct {
+//                 count: 3,
+//                 name: String::from("Tuan"),
+//             })
+//         );
+//         assert!(
+//             test_struct_entry
+//                 .remove_range::<TestStruct, _>("count", 2..4)
+//                 .is_none()
+//         );
 
-    #[test]
-    fn get_range() {
-        let mut int_entry = TreeSpaceEntry::new();
-        assert_eq!(int_entry.get_range::<i64, _>("", 2..4), None);
-        int_entry.add(3);
-        int_entry.add(5);
-        assert_eq!(int_entry.get_range::<i64, _>("", 2..4), Some(3));
-        assert_ne!(int_entry.get_range::<i64, _>("", 2..4), None);
+//         let mut compound_struct_entry = TreeSpaceEntry::new();
+//         compound_struct_entry.add(CompoundStruct {
+//             person: TestStruct {
+//                 count: 3,
+//                 name: String::from("Tuan"),
+//             },
+//             gpa: 3.0,
+//         });
+//         compound_struct_entry.add(CompoundStruct {
+//             person: TestStruct {
+//                 count: 5,
+//                 name: String::from("Duane"),
+//             },
+//             gpa: 3.5,
+//         });
 
-        let mut test_struct_entry = TreeSpaceEntry::new();
-        test_struct_entry.add(TestStruct {
-            count: 3,
-            name: String::from("Tuan"),
-        });
-        test_struct_entry.add(TestStruct {
-            count: 5,
-            name: String::from("Duane"),
-        });
+//         assert_eq!(
+//             compound_struct_entry.remove_range::<CompoundStruct, _>("person.count", 2..4),
+//             Some(CompoundStruct {
+//                 person: TestStruct {
+//                     count: 3,
+//                     name: String::from("Tuan"),
+//                 },
+//                 gpa: 3.0,
+//             })
+//         );
+//         assert!(
+//             compound_struct_entry
+//                 .remove_range::<CompoundStruct, _>("person.count", 2..4)
+//                 .is_none()
+//         );
+//     }
 
-        assert_eq!(
-            test_struct_entry.get_range::<TestStruct, _>("count", 2..4),
-            Some(TestStruct {
-                count: 3,
-                name: String::from("Tuan"),
-            })
-        );
-        assert!(
-            test_struct_entry
-                .get_range::<TestStruct, _>("count", 2..4)
-                .is_some()
-        );
+//     #[test]
+//     fn get_all_range() {
+//         let mut int_entry = TreeSpaceEntry::new();
+//         int_entry.add(3);
+//         int_entry.add(5);
+//         assert_eq!(int_entry.get_all_range::<i64, _>("", 2..4).count(), 1);
+//         assert_eq!(int_entry.get_all_range::<i64, _>("", 2..4).count(), 1);
 
-        let mut compound_struct_entry = TreeSpaceEntry::new();
-        compound_struct_entry.add(CompoundStruct {
-            person: TestStruct {
-                count: 5,
-                name: String::from("Duane"),
-            },
-            gpa: 3.5,
-        });
-        compound_struct_entry.add(CompoundStruct {
-            person: TestStruct {
-                count: 3,
-                name: String::from("Tuan"),
-            },
-            gpa: 3.0,
-        });
+//         let mut test_struct_entry = TreeSpaceEntry::new();
+//         test_struct_entry.add(TestStruct {
+//             count: 3,
+//             name: String::from("Tuan"),
+//         });
+//         test_struct_entry.add(TestStruct {
+//             count: 3,
+//             name: String::from("Minh"),
+//         });
 
-        assert_eq!(
-            compound_struct_entry.get_range::<CompoundStruct, _>("person.count", 2..4),
-            Some(CompoundStruct {
-                person: TestStruct {
-                    count: 3,
-                    name: String::from("Tuan"),
-                },
-                gpa: 3.0,
-            })
-        );
-        assert!(
-            compound_struct_entry
-                .get_range::<CompoundStruct, _>("person.count", 2..4)
-                .is_some()
-        );
-    }
+//         test_struct_entry.add(TestStruct {
+//             count: 5,
+//             name: String::from("Duane"),
+//         });
 
-    #[test]
-    fn remove_range() {
-        let mut int_entry = TreeSpaceEntry::new();
-        assert_eq!(int_entry.remove_range::<i64, _>("", 2..4), None);
-        int_entry.add(3);
-        int_entry.add(5);
-        assert_eq!(int_entry.remove_range::<i64, _>("", 2..4), Some(3));
-        assert_eq!(int_entry.remove_range::<i64, _>("", 2..4), None);
+//         assert_eq!(
+//             test_struct_entry
+//                 .get_all_range::<TestStruct, _>("count", 2..4)
+//                 .count(),
+//             2
+//         );
+//         assert_eq!(
+//             test_struct_entry
+//                 .get_all_range::<TestStruct, _>("count", 2..4)
+//                 .count(),
+//             2
+//         );
 
-        let mut test_struct_entry = TreeSpaceEntry::new();
-        test_struct_entry.add(TestStruct {
-            count: 3,
-            name: String::from("Tuan"),
-        });
-        test_struct_entry.add(TestStruct {
-            count: 5,
-            name: String::from("Duane"),
-        });
+//         let mut compound_struct_entry = TreeSpaceEntry::new();
+//         compound_struct_entry.add(CompoundStruct {
+//             person: TestStruct {
+//                 count: 5,
+//                 name: String::from("Duane"),
+//             },
+//             gpa: 3.5,
+//         });
+//         compound_struct_entry.add(CompoundStruct {
+//             person: TestStruct {
+//                 count: 3,
+//                 name: String::from("Tuan"),
+//             },
+//             gpa: 3.0,
+//         });
+//         compound_struct_entry.add(CompoundStruct {
+//             person: TestStruct {
+//                 count: 3,
+//                 name: String::from("Minh"),
+//             },
+//             gpa: 3.0,
+//         });
 
-        assert_eq!(
-            test_struct_entry.remove_range::<TestStruct, _>("count", 2..4),
-            Some(TestStruct {
-                count: 3,
-                name: String::from("Tuan"),
-            })
-        );
-        assert!(
-            test_struct_entry
-                .remove_range::<TestStruct, _>("count", 2..4)
-                .is_none()
-        );
+//         assert_eq!(
+//             compound_struct_entry
+//                 .get_all_range::<CompoundStruct, _>("person.count", 2..4)
+//                 .count(),
+//             2
+//         );
+//         assert_eq!(
+//             compound_struct_entry
+//                 .get_all_range::<CompoundStruct, _>("person.count", 2..4)
+//                 .count(),
+//             2
+//         );
+//     }
 
-        let mut compound_struct_entry = TreeSpaceEntry::new();
-        compound_struct_entry.add(CompoundStruct {
-            person: TestStruct {
-                count: 3,
-                name: String::from("Tuan"),
-            },
-            gpa: 3.0,
-        });
-        compound_struct_entry.add(CompoundStruct {
-            person: TestStruct {
-                count: 5,
-                name: String::from("Duane"),
-            },
-            gpa: 3.5,
-        });
+//     #[test]
+//     fn remove_all_range() {
+//         let mut int_entry = TreeSpaceEntry::new();
+//         int_entry.add(3);
+//         int_entry.add(5);
+//         assert_eq!(int_entry.remove_all_range::<i64, _>("", 2..4).len(), 1);
+//         assert_eq!(int_entry.remove_all_range::<i64, _>("", 2..4).len(), 0);
 
-        assert_eq!(
-            compound_struct_entry.remove_range::<CompoundStruct, _>("person.count", 2..4),
-            Some(CompoundStruct {
-                person: TestStruct {
-                    count: 3,
-                    name: String::from("Tuan"),
-                },
-                gpa: 3.0,
-            })
-        );
-        assert!(
-            compound_struct_entry
-                .remove_range::<CompoundStruct, _>("person.count", 2..4)
-                .is_none()
-        );
-    }
+//         let mut test_struct_entry = TreeSpaceEntry::new();
+//         test_struct_entry.add(TestStruct {
+//             count: 3,
+//             name: String::from("Tuan"),
+//         });
+//         test_struct_entry.add(TestStruct {
+//             count: 3,
+//             name: String::from("Minh"),
+//         });
 
-    #[test]
-    fn get_all_range() {
-        let mut int_entry = TreeSpaceEntry::new();
-        int_entry.add(3);
-        int_entry.add(5);
-        assert_eq!(int_entry.get_all_range::<i64, _>("", 2..4).count(), 1);
-        assert_eq!(int_entry.get_all_range::<i64, _>("", 2..4).count(), 1);
+//         test_struct_entry.add(TestStruct {
+//             count: 5,
+//             name: String::from("Duane"),
+//         });
 
-        let mut test_struct_entry = TreeSpaceEntry::new();
-        test_struct_entry.add(TestStruct {
-            count: 3,
-            name: String::from("Tuan"),
-        });
-        test_struct_entry.add(TestStruct {
-            count: 3,
-            name: String::from("Minh"),
-        });
+//         assert_eq!(
+//             test_struct_entry
+//                 .remove_all_range::<TestStruct, _>("count", 2..4)
+//                 .len(),
+//             2
+//         );
+//         assert_eq!(
+//             test_struct_entry
+//                 .remove_all_range::<TestStruct, _>("count", 2..4)
+//                 .len(),
+//             0
+//         );
+//         assert_eq!(
+//             test_struct_entry
+//                 .remove_all_range::<TestStruct, _>("count", 4..)
+//                 .len(),
+//             1
+//         );
 
-        test_struct_entry.add(TestStruct {
-            count: 5,
-            name: String::from("Duane"),
-        });
+//         let mut compound_struct_entry = TreeSpaceEntry::new();
+//         compound_struct_entry.add(CompoundStruct {
+//             person: TestStruct {
+//                 count: 5,
+//                 name: String::from("Duane"),
+//             },
+//             gpa: 3.5,
+//         });
+//         compound_struct_entry.add(CompoundStruct {
+//             person: TestStruct {
+//                 count: 3,
+//                 name: String::from("Tuan"),
+//             },
+//             gpa: 3.0,
+//         });
+//         compound_struct_entry.add(CompoundStruct {
+//             person: TestStruct {
+//                 count: 3,
+//                 name: String::from("Minh"),
+//             },
+//             gpa: 3.0,
+//         });
 
-        assert_eq!(
-            test_struct_entry
-                .get_all_range::<TestStruct, _>("count", 2..4)
-                .count(),
-            2
-        );
-        assert_eq!(
-            test_struct_entry
-                .get_all_range::<TestStruct, _>("count", 2..4)
-                .count(),
-            2
-        );
-
-        let mut compound_struct_entry = TreeSpaceEntry::new();
-        compound_struct_entry.add(CompoundStruct {
-            person: TestStruct {
-                count: 5,
-                name: String::from("Duane"),
-            },
-            gpa: 3.5,
-        });
-        compound_struct_entry.add(CompoundStruct {
-            person: TestStruct {
-                count: 3,
-                name: String::from("Tuan"),
-            },
-            gpa: 3.0,
-        });
-        compound_struct_entry.add(CompoundStruct {
-            person: TestStruct {
-                count: 3,
-                name: String::from("Minh"),
-            },
-            gpa: 3.0,
-        });
-
-        assert_eq!(
-            compound_struct_entry
-                .get_all_range::<CompoundStruct, _>("person.count", 2..4)
-                .count(),
-            2
-        );
-        assert_eq!(
-            compound_struct_entry
-                .get_all_range::<CompoundStruct, _>("person.count", 2..4)
-                .count(),
-            2
-        );
-    }
-
-    #[test]
-    fn remove_all_range() {
-        let mut int_entry = TreeSpaceEntry::new();
-        int_entry.add(3);
-        int_entry.add(5);
-        assert_eq!(int_entry.remove_all_range::<i64, _>("", 2..4).len(), 1);
-        assert_eq!(int_entry.remove_all_range::<i64, _>("", 2..4).len(), 0);
-
-        let mut test_struct_entry = TreeSpaceEntry::new();
-        test_struct_entry.add(TestStruct {
-            count: 3,
-            name: String::from("Tuan"),
-        });
-        test_struct_entry.add(TestStruct {
-            count: 3,
-            name: String::from("Minh"),
-        });
-
-        test_struct_entry.add(TestStruct {
-            count: 5,
-            name: String::from("Duane"),
-        });
-
-        assert_eq!(
-            test_struct_entry
-                .remove_all_range::<TestStruct, _>("count", 2..4)
-                .len(),
-            2
-        );
-        assert_eq!(
-            test_struct_entry
-                .remove_all_range::<TestStruct, _>("count", 2..4)
-                .len(),
-            0
-        );
-        assert_eq!(
-            test_struct_entry
-                .remove_all_range::<TestStruct, _>("count", 4..)
-                .len(),
-            1
-        );
-
-        let mut compound_struct_entry = TreeSpaceEntry::new();
-        compound_struct_entry.add(CompoundStruct {
-            person: TestStruct {
-                count: 5,
-                name: String::from("Duane"),
-            },
-            gpa: 3.5,
-        });
-        compound_struct_entry.add(CompoundStruct {
-            person: TestStruct {
-                count: 3,
-                name: String::from("Tuan"),
-            },
-            gpa: 3.0,
-        });
-        compound_struct_entry.add(CompoundStruct {
-            person: TestStruct {
-                count: 3,
-                name: String::from("Minh"),
-            },
-            gpa: 3.0,
-        });
-
-        assert_eq!(
-            compound_struct_entry
-                .remove_all_range::<CompoundStruct, _>("person.count", 2..4)
-                .len(),
-            2
-        );
-        assert_eq!(
-            compound_struct_entry
-                .remove_all_range::<CompoundStruct, _>("person.count", 2..4)
-                .len(),
-            0
-        );
-        assert_eq!(
-            compound_struct_entry
-                .remove_all_range::<CompoundStruct, _>("person.count", 4..)
-                .len(),
-            1
-        );
-    }
-}
+//         assert_eq!(
+//             compound_struct_entry
+//                 .remove_all_range::<CompoundStruct, _>("person.count", 2..4)
+//                 .len(),
+//             2
+//         );
+//         assert_eq!(
+//             compound_struct_entry
+//                 .remove_all_range::<CompoundStruct, _>("person.count", 2..4)
+//                 .len(),
+//             0
+//         );
+//         assert_eq!(
+//             compound_struct_entry
+//                 .remove_all_range::<CompoundStruct, _>("person.count", 4..)
+//                 .len(),
+//             1
+//         );
+//     }
+// }

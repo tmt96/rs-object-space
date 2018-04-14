@@ -1,27 +1,21 @@
-use std::iter::empty;
-use std::collections::{BTreeMap, HashMap};
-use std::sync::Arc;
 use std::borrow::Borrow;
-use std::iter::IntoIterator;
-use std::collections::range::RangeArgument;
+use std::collections::{BTreeMap, HashMap};
+use std::iter::empty;
+use std::sync::Arc;
 
-use serde_json::value::{from_value, to_value, Value};
-use serde_json::map::Map;
-use serde_json::Number;
-use serde::ser::Serialize;
-use serde::de::Deserialize;
 use ordered_float::NotNaN;
+use serde_json::map::Map;
+use serde_json::value::Value;
+use serde_json::Number;
 
-mod range_entry;
-mod helpers;
 mod exact_key_entry;
+pub mod helpers;
+mod range_entry;
 
-use self::helpers::{deflatten, flatten, get_all_prims_from_map, get_primitive_from_map,
-                    get_primitive_key, get_primitive_range, remove_all_prims_key,
-                    remove_all_prims_range, remove_object, remove_primitive_from_map,
-                    remove_primitive_key, remove_primitive_range, remove_value_arc};
-pub use entry::range_entry::RangeEntry;
+use self::helpers::{get_all_prims_from_map, get_primitive_from_map, remove_object,
+                    remove_primitive_from_map};
 pub use entry::exact_key_entry::ExactKeyEntry;
+pub use entry::range_entry::RangeEntry;
 
 pub enum TreeSpaceEntry {
     FloatLeaf(BTreeMap<NotNaN<f64>, Vec<Arc<Value>>>),
@@ -38,84 +32,49 @@ impl TreeSpaceEntry {
         TreeSpaceEntry::Null
     }
 
-    pub fn add<T>(&mut self, obj: T)
-    where
-        T: Serialize,
-    {
-        match to_value(obj) {
-            Ok(value) => {
-                let flattened_val = flatten(value);
-                match flattened_val.clone() {
-                    Value::Number(num) => self.add_value_by_num(num, Arc::new(flattened_val)),
-                    Value::Bool(boolean) => {
-                        self.add_value_by_bool(boolean, Arc::new(flattened_val))
-                    }
-                    Value::String(string) => {
-                        self.add_value_by_string(string, Arc::new(flattened_val))
-                    }
-                    Value::Array(vec) => self.add_value_by_array(vec, Arc::new(flattened_val)),
-                    Value::Object(map) => self.add_value_by_object(map, Arc::new(flattened_val)),
-                    _ => (),
-                }
-            }
-            Err(e) => panic!("struct not serializable: {:?}", e),
+    pub fn add(&mut self, obj: Value) {
+        match obj.clone() {
+            Value::Number(num) => self.add_value_by_num(num, Arc::new(obj)),
+            Value::Bool(boolean) => self.add_value(boolean, Arc::new(obj)),
+            Value::String(string) => self.add_value(string, Arc::new(obj)),
+            Value::Array(vec) => self.add_value_by_array(vec, Arc::new(obj)),
+            Value::Object(map) => self.add_value_by_object(map, Arc::new(obj)),
+            _ => (),
         }
     }
 
-    pub fn get<T>(&self) -> Option<T>
-    where
-        for<'de> T: Deserialize<'de>,
-    {
-        match self.get_helper() {
-            Some(arc) => {
-                let val: &Value = arc.borrow();
-                from_value(deflatten(val.clone())).ok()
-            }
-            None => None,
-        }
+    pub fn get(&self) -> Option<Value> {
+        self.get_helper().map(|arc| {
+            let val: &Value = arc.borrow();
+            val.clone()
+        })
     }
 
-    pub fn get_all<'a, T>(&'a self) -> Box<Iterator<Item = T> + 'a>
-    where
-        for<'de> T: Deserialize<'de> + 'static,
-    {
+    pub fn get_all<'a>(&'a self) -> Box<Iterator<Item = Value> + 'a> {
         match *self {
             TreeSpaceEntry::Null => Box::new(empty()),
             TreeSpaceEntry::BoolLeaf(ref bool_map) => get_all_prims_from_map(bool_map),
             TreeSpaceEntry::IntLeaf(ref int_map) => get_all_prims_from_map(int_map),
             TreeSpaceEntry::FloatLeaf(ref float_map) => get_all_prims_from_map(float_map),
             TreeSpaceEntry::StringLeaf(ref string_map) => get_all_prims_from_map(string_map),
-            TreeSpaceEntry::VecLeaf(ref vec) => Box::new(vec.iter().filter_map(|item| {
+            TreeSpaceEntry::VecLeaf(ref vec) => Box::new(vec.iter().map(|item| {
                 let val: &Value = item.borrow();
-                from_value(deflatten(val.clone())).ok()
+                val.clone()
             })),
-            TreeSpaceEntry::Branch(ref object_field_map) => {
-                if let Some((_, value)) = object_field_map.iter().next() {
-                    return value.get_all::<T>();
-                }
-                Box::new(empty())
-            }
+            TreeSpaceEntry::Branch(ref object_field_map) => object_field_map
+                .iter()
+                .next()
+                .map_or(Box::new(empty()), |(_, value)| value.get_all()),
         }
     }
 
-    pub fn remove<T>(&mut self) -> Option<T>
-    where
-        for<'de> T: Deserialize<'de>,
-    {
-        match self.remove_helper() {
-            Some(arc) => match Arc::try_unwrap(arc) {
-                Ok(value) => from_value(deflatten(value)).ok(),
-                Err(_) => None,
-            },
-            None => None,
-        }
+    pub fn remove(&mut self) -> Option<Value> {
+        self.remove_helper()
+            .and_then(|arc| Arc::try_unwrap(arc).ok())
     }
 
-    pub fn remove_all<'a, T>(&'a mut self) -> Vec<T>
-    where
-        for<'de> T: Deserialize<'de> + 'static,
-    {
-        let result = self.get_all::<T>().collect();
+    pub fn remove_all(&mut self) -> Vec<Value> {
+        let result = self.get_all().collect();
         match *self {
             TreeSpaceEntry::BoolLeaf(ref mut bool_map) => *bool_map = BTreeMap::new(),
             TreeSpaceEntry::IntLeaf(ref mut int_map) => *int_map = BTreeMap::new(),
@@ -145,116 +104,6 @@ impl TreeSpaceEntry {
         }
     }
 
-    fn get_int_range_helper<R>(&self, field: &str, condition: R) -> Option<Arc<Value>>
-    where
-        R: RangeArgument<i64>,
-    {
-        match *self {
-            TreeSpaceEntry::Null => None,
-            TreeSpaceEntry::IntLeaf(ref int_map) => get_primitive_range(int_map, condition),
-            TreeSpaceEntry::Branch(ref field_map) => match field_map.get(field) {
-                Some(entry) => entry.get_int_range_helper("", condition),
-                None => panic!("No such field found!"),
-            },
-            _ => panic!("Not an int type or a struct holding an int"),
-        }
-    }
-
-    fn get_float_range_helper<R>(&self, field: &str, condition: R) -> Option<Arc<Value>>
-    where
-        R: RangeArgument<NotNaN<f64>>,
-    {
-        match *self {
-            TreeSpaceEntry::Null => None,
-            TreeSpaceEntry::FloatLeaf(ref float_map) => get_primitive_range(float_map, condition),
-            TreeSpaceEntry::Branch(ref field_map) => match field_map.get(field) {
-                Some(entry) => entry.get_float_range_helper("", condition),
-                None => panic!("No such field found!"),
-            },
-            _ => panic!("Not an float type or a struct holding an float"),
-        }
-    }
-
-    fn get_string_range_helper<R>(&self, field: &str, condition: R) -> Option<Arc<Value>>
-    where
-        R: RangeArgument<String>,
-    {
-        match *self {
-            TreeSpaceEntry::Null => None,
-            TreeSpaceEntry::StringLeaf(ref string_map) => {
-                get_primitive_range(string_map, condition)
-            }
-            TreeSpaceEntry::Branch(ref field_map) => match field_map.get(field) {
-                Some(entry) => entry.get_string_range_helper("", condition),
-                None => panic!("No such field found!"),
-            },
-            _ => panic!("Not an string type or a struct holding an string"),
-        }
-    }
-
-    fn get_bool_range_helper<R>(&self, field: &str, condition: R) -> Option<Arc<Value>>
-    where
-        R: RangeArgument<bool>,
-    {
-        match *self {
-            TreeSpaceEntry::Null => None,
-            TreeSpaceEntry::BoolLeaf(ref bool_map) => get_primitive_range(bool_map, condition),
-            TreeSpaceEntry::Branch(ref field_map) => match field_map.get(field) {
-                Some(entry) => entry.get_bool_range_helper("", condition),
-                None => panic!("No such field found!"),
-            },
-            _ => panic!("Not an bool type or a struct holding an bool"),
-        }
-    }
-
-    fn get_int_key_helper(&self, field: &str, key: &i64) -> Option<Arc<Value>> {
-        match *self {
-            TreeSpaceEntry::Null => None,
-            TreeSpaceEntry::IntLeaf(ref int_map) => get_primitive_key(int_map, key),
-            TreeSpaceEntry::Branch(ref field_map) => match field_map.get(field) {
-                Some(entry) => entry.get_int_key_helper("", key),
-                None => panic!("No such field found!"),
-            },
-            _ => panic!("Not an int type or a struct holding an int"),
-        }
-    }
-
-    fn get_string_key_helper(&self, field: &str, key: &String) -> Option<Arc<Value>> {
-        match *self {
-            TreeSpaceEntry::Null => None,
-            TreeSpaceEntry::StringLeaf(ref string_map) => get_primitive_key(string_map, &key),
-            TreeSpaceEntry::Branch(ref field_map) => match field_map.get(field) {
-                Some(entry) => entry.get_string_key_helper("", key),
-                None => panic!("No such field found!"),
-            },
-            _ => panic!("Not an int type or a struct holding an int"),
-        }
-    }
-
-    fn get_bool_key_helper(&self, field: &str, key: &bool) -> Option<Arc<Value>> {
-        match *self {
-            TreeSpaceEntry::Null => None,
-            TreeSpaceEntry::BoolLeaf(ref bool_map) => get_primitive_key(bool_map, key),
-            TreeSpaceEntry::Branch(ref field_map) => match field_map.get(field) {
-                Some(entry) => entry.get_bool_key_helper("", key),
-                None => panic!("No such field found!"),
-            },
-            _ => panic!("Not an int type or a struct holding an int"),
-        }
-    }
-
-    fn get_float_key_helper(&self, field: &str, key: &NotNaN<f64>) -> Option<Arc<Value>> {
-        match *self {
-            TreeSpaceEntry::Null => None,
-            TreeSpaceEntry::FloatLeaf(ref float_map) => get_primitive_key(float_map, key),
-            TreeSpaceEntry::Branch(ref field_map) => match field_map.get(field) {
-                Some(entry) => entry.get_float_key_helper("", key),
-                None => panic!("No such field found!"),
-            },
-            _ => panic!("Not an int type or a struct holding an int"),
-        }
-    }
-
     fn remove_helper(&mut self) -> Option<Arc<Value>> {
         match *self {
             TreeSpaceEntry::Null => None,
@@ -267,440 +116,20 @@ impl TreeSpaceEntry {
         }
     }
 
-    fn remove_int_range<R>(&mut self, field: &str, condition: R) -> Option<Arc<Value>>
-    where
-        R: RangeArgument<i64>,
-    {
-        match *self {
-            TreeSpaceEntry::Null => None,
-            TreeSpaceEntry::IntLeaf(ref mut int_map) => remove_primitive_range(int_map, condition),
-            TreeSpaceEntry::Branch(ref mut object_field_map) => {
-                let arc = match object_field_map.get_mut(field) {
-                    None => panic!("Field {} does not exist", field),
-                    Some(entry) => entry.remove_int_range(field, condition),
-                };
-
-                match arc {
-                    Some(arc) => {
-                        remove_value_arc(object_field_map, &arc);
-                        Some(arc)
-                    }
-                    None => None,
-                }
-            }
-            _ => panic!("Not an int type or a struct holding an int"),
-        }
-    }
-
-    fn remove_float_range<R>(&mut self, field: &str, condition: R) -> Option<Arc<Value>>
-    where
-        R: RangeArgument<NotNaN<f64>>,
-    {
-        match *self {
-            TreeSpaceEntry::Null => None,
-            TreeSpaceEntry::FloatLeaf(ref mut float_map) => {
-                remove_primitive_range(float_map, condition)
-            }
-            TreeSpaceEntry::Branch(ref mut object_field_map) => {
-                let arc = match object_field_map.get_mut(field) {
-                    None => panic!("Field {} does not exist", field),
-                    Some(entry) => entry.remove_float_range(field, condition),
-                };
-
-                match arc {
-                    Some(arc) => {
-                        remove_value_arc(object_field_map, &arc);
-                        Some(arc)
-                    }
-                    None => None,
-                }
-            }
-            _ => panic!("Not an float type or a struct holding an float"),
-        }
-    }
-
-    fn remove_string_range<R>(&mut self, field: &str, condition: R) -> Option<Arc<Value>>
-    where
-        R: RangeArgument<String>,
-    {
-        match *self {
-            TreeSpaceEntry::Null => None,
-            TreeSpaceEntry::StringLeaf(ref mut string_map) => {
-                remove_primitive_range(string_map, condition)
-            }
-            TreeSpaceEntry::Branch(ref mut object_field_map) => {
-                let arc = match object_field_map.get_mut(field) {
-                    None => panic!("Field {} does not exist", field),
-                    Some(entry) => entry.remove_string_range(field, condition),
-                };
-
-                match arc {
-                    Some(arc) => {
-                        remove_value_arc(object_field_map, &arc);
-                        Some(arc)
-                    }
-                    None => None,
-                }
-            }
-            _ => panic!("Not an string type or a struct holding an string"),
-        }
-    }
-
-    fn remove_bool_range<R>(&mut self, field: &str, condition: R) -> Option<Arc<Value>>
-    where
-        R: RangeArgument<bool>,
-    {
-        match *self {
-            TreeSpaceEntry::Null => None,
-            TreeSpaceEntry::BoolLeaf(ref mut bool_map) => {
-                remove_primitive_range(bool_map, condition)
-            }
-            TreeSpaceEntry::Branch(ref mut object_field_map) => {
-                let arc = match object_field_map.get_mut(field) {
-                    None => panic!("Field {} does not exist", field),
-                    Some(entry) => entry.remove_bool_range(field, condition),
-                };
-
-                match arc {
-                    Some(arc) => {
-                        remove_value_arc(object_field_map, &arc);
-                        Some(arc)
-                    }
-                    None => None,
-                }
-            }
-            _ => panic!("Not an int type or a struct holding an bool"),
-        }
-    }
-
-    fn remove_int_key(&mut self, field: &str, key: &i64) -> Option<Arc<Value>> {
-        match *self {
-            TreeSpaceEntry::Null => None,
-            TreeSpaceEntry::IntLeaf(ref mut int_map) => remove_primitive_key(int_map, key),
-            TreeSpaceEntry::Branch(ref mut object_field_map) => {
-                let arc = match object_field_map.get_mut(field) {
-                    None => panic!("Field {} does not exist", field),
-                    Some(entry) => entry.remove_int_key(field, key),
-                };
-
-                match arc {
-                    Some(arc) => {
-                        remove_value_arc(object_field_map, &arc);
-                        Some(arc)
-                    }
-                    None => None,
-                }
-            }
-            _ => panic!("Not an int type or a struct holding an int"),
-        }
-    }
-
-    fn remove_string_key(&mut self, field: &str, key: &String) -> Option<Arc<Value>> {
-        match *self {
-            TreeSpaceEntry::Null => None,
-            TreeSpaceEntry::StringLeaf(ref mut string_map) => remove_primitive_key(string_map, key),
-            TreeSpaceEntry::Branch(ref mut object_field_map) => {
-                let arc = match object_field_map.get_mut(field) {
-                    None => panic!("Field {} does not exist", field),
-                    Some(entry) => entry.remove_string_key(field, key),
-                };
-
-                match arc {
-                    Some(arc) => {
-                        remove_value_arc(object_field_map, &arc);
-                        Some(arc)
-                    }
-                    None => None,
-                }
-            }
-            _ => panic!("Not an int type or a struct holding an int"),
-        }
-    }
-
-    fn remove_bool_key(&mut self, field: &str, key: &bool) -> Option<Arc<Value>> {
-        match *self {
-            TreeSpaceEntry::Null => None,
-            TreeSpaceEntry::BoolLeaf(ref mut bool_map) => remove_primitive_key(bool_map, key),
-            TreeSpaceEntry::Branch(ref mut object_field_map) => {
-                let arc = match object_field_map.get_mut(field) {
-                    None => panic!("Field {} does not exist", field),
-                    Some(entry) => entry.remove_bool_key(field, key),
-                };
-
-                match arc {
-                    Some(arc) => {
-                        remove_value_arc(object_field_map, &arc);
-                        Some(arc)
-                    }
-                    None => None,
-                }
-            }
-            _ => panic!("Not an int type or a struct holding an int"),
-        }
-    }
-
-    fn remove_float_key(&mut self, field: &str, key: &NotNaN<f64>) -> Option<Arc<Value>> {
-        match *self {
-            TreeSpaceEntry::Null => None,
-            TreeSpaceEntry::FloatLeaf(ref mut float_map) => remove_primitive_key(float_map, key),
-            TreeSpaceEntry::Branch(ref mut object_field_map) => {
-                let arc = match object_field_map.get_mut(field) {
-                    None => panic!("Field {} does not exist", field),
-                    Some(entry) => entry.remove_float_key(field, key),
-                };
-
-                match arc {
-                    Some(arc) => {
-                        remove_value_arc(object_field_map, &arc);
-                        Some(arc)
-                    }
-                    None => None,
-                }
-            }
-            _ => panic!("Not an int type or a struct holding an int"),
-        }
-    }
-
-    fn remove_all_int_range<R>(&mut self, field: &str, condition: R) -> Vec<Arc<Value>>
-    where
-        R: RangeArgument<i64>,
-    {
-        match *self {
-            TreeSpaceEntry::Null => Vec::new(),
-            TreeSpaceEntry::IntLeaf(ref mut int_map) => remove_all_prims_range(int_map, condition),
-            TreeSpaceEntry::Branch(ref mut field_map) => {
-                let arc_list = match field_map.get_mut(field) {
-                    None => panic!("Field {} does not exist", field),
-                    Some(entry) => entry.remove_all_int_range(field, condition),
-                };
-
-                for arc in arc_list.iter() {
-                    remove_value_arc(field_map, arc);
-                }
-                arc_list
-            }
-            _ => panic!("Not an int type or a struct holding an int"),
-        }
-    }
-
-    fn remove_all_float_range<R>(&mut self, field: &str, condition: R) -> Vec<Arc<Value>>
-    where
-        R: RangeArgument<NotNaN<f64>>,
-    {
-        match *self {
-            TreeSpaceEntry::Null => Vec::new(),
-            TreeSpaceEntry::FloatLeaf(ref mut float_map) => {
-                remove_all_prims_range(float_map, condition)
-            }
-            TreeSpaceEntry::Branch(ref mut field_map) => {
-                let arc_list = match field_map.get_mut(field) {
-                    None => panic!("Field {} does not exist", field),
-                    Some(entry) => entry.remove_all_float_range(field, condition),
-                };
-
-                for arc in arc_list.iter() {
-                    remove_value_arc(field_map, arc);
-                }
-                arc_list
-            }
-            _ => panic!("Not an float type or a struct holding an float"),
-        }
-    }
-
-    fn remove_all_string_range<R>(&mut self, field: &str, condition: R) -> Vec<Arc<Value>>
-    where
-        R: RangeArgument<String>,
-    {
-        match *self {
-            TreeSpaceEntry::Null => Vec::new(),
-            TreeSpaceEntry::StringLeaf(ref mut string_map) => {
-                remove_all_prims_range(string_map, condition)
-            }
-            TreeSpaceEntry::Branch(ref mut field_map) => {
-                let arc_list = match field_map.get_mut(field) {
-                    None => panic!("Field {} does not exist", field),
-                    Some(entry) => entry.remove_all_string_range(field, condition),
-                };
-
-                for arc in arc_list.iter() {
-                    remove_value_arc(field_map, arc);
-                }
-                arc_list
-            }
-            _ => panic!("Not an string type or a struct holding an string"),
-        }
-    }
-
-    fn remove_all_bool_range<R>(&mut self, field: &str, condition: R) -> Vec<Arc<Value>>
-    where
-        R: RangeArgument<bool>,
-    {
-        match *self {
-            TreeSpaceEntry::Null => Vec::new(),
-            TreeSpaceEntry::BoolLeaf(ref mut bool_map) => {
-                remove_all_prims_range(bool_map, condition)
-            }
-            TreeSpaceEntry::Branch(ref mut field_map) => {
-                let arc_list = match field_map.get_mut(field) {
-                    None => panic!("Field {} does not exist", field),
-                    Some(entry) => entry.remove_all_bool_range(field, condition),
-                };
-
-                for arc in arc_list.iter() {
-                    remove_value_arc(field_map, arc);
-                }
-                arc_list
-            }
-            _ => panic!("Not an bool type or a struct holding an bool"),
-        }
-    }
-
-    fn remove_all_int_key(&mut self, field: &str, key: &i64) -> Vec<Arc<Value>> {
-        match *self {
-            TreeSpaceEntry::Null => Vec::new(),
-            TreeSpaceEntry::IntLeaf(ref mut int_map) => remove_all_prims_key(int_map, key),
-            TreeSpaceEntry::Branch(ref mut field_map) => {
-                let arc_list = match field_map.get_mut(field) {
-                    None => panic!("Field {} does not exist", field),
-                    Some(entry) => entry.remove_all_int_key(field, key),
-                };
-
-                for arc in arc_list.iter() {
-                    remove_value_arc(field_map, arc);
-                }
-                arc_list
-            }
-            _ => panic!("Not an int type or a struct holding an int"),
-        }
-    }
-
-    fn remove_all_string_key(&mut self, field: &str, key: &String) -> Vec<Arc<Value>> {
-        match *self {
-            TreeSpaceEntry::Null => Vec::new(),
-            TreeSpaceEntry::StringLeaf(ref mut string_map) => remove_all_prims_key(string_map, key),
-            TreeSpaceEntry::Branch(ref mut field_map) => {
-                let arc_list = match field_map.get_mut(field) {
-                    None => panic!("Field {} does not exist", field),
-                    Some(entry) => entry.remove_all_string_key(field, key),
-                };
-
-                for arc in arc_list.iter() {
-                    remove_value_arc(field_map, arc);
-                }
-                arc_list
-            }
-            _ => panic!("Not an int type or a struct holding an int"),
-        }
-    }
-
-    fn remove_all_bool_key(&mut self, field: &str, key: &bool) -> Vec<Arc<Value>> {
-        match *self {
-            TreeSpaceEntry::Null => Vec::new(),
-            TreeSpaceEntry::BoolLeaf(ref mut bool_map) => remove_all_prims_key(bool_map, key),
-            TreeSpaceEntry::Branch(ref mut field_map) => {
-                let arc_list = match field_map.get_mut(field) {
-                    None => panic!("Field {} does not exist", field),
-                    Some(entry) => entry.remove_all_bool_key(field, key),
-                };
-
-                for arc in arc_list.iter() {
-                    remove_value_arc(field_map, arc);
-                }
-                arc_list
-            }
-            _ => panic!("Not an int type or a struct holding an int"),
-        }
-    }
-
-    fn remove_all_float_key(&mut self, field: &str, key: &NotNaN<f64>) -> Vec<Arc<Value>> {
-        match *self {
-            TreeSpaceEntry::Null => Vec::new(),
-            TreeSpaceEntry::FloatLeaf(ref mut float_map) => remove_all_prims_key(float_map, key),
-            TreeSpaceEntry::Branch(ref mut field_map) => {
-                let arc_list = match field_map.get_mut(field) {
-                    None => panic!("Field {} does not exist", field),
-                    Some(entry) => entry.remove_all_float_key(field, key),
-                };
-
-                for arc in arc_list.iter() {
-                    remove_value_arc(field_map, arc);
-                }
-                arc_list
-            }
-            _ => panic!("Not an int type or a struct holding an int"),
-        }
-    }
-
     fn add_value_by_num(&mut self, num: Number, value: Arc<Value>) {
-        if let Some(i) = num.as_i64() {
-            self.add_value_by_int(i, value);
-        } else if let Some(f) = num.as_f64() {
-            self.add_value_by_float(f, value);
+        // only parse as f64 if it is actually f64
+        // (e.g: accept '64.0' but not '64')
+        if num.is_f64() {
+            self.add_value(num.as_f64().unwrap(), value);
+        } else if let Some(i) = num.as_i64() {
+            self.add_value(i, value);
         } else {
             panic!("Not a number!");
         }
     }
 
-    fn add_value_by_int(&mut self, i: i64, value: Arc<Value>) {
-        if let &mut TreeSpaceEntry::Null = self {
-            *self = TreeSpaceEntry::IntLeaf(BTreeMap::new());
-        }
-
-        match *self {
-            TreeSpaceEntry::IntLeaf(ref mut map) => {
-                let vec = map.entry(i).or_insert(Vec::new());
-                vec.push(value);
-            }
-            _ => panic!("Incorrect data type! Found int."),
-        }
-    }
-
-    fn add_value_by_float(&mut self, f: f64, value: Arc<Value>) {
-        if let &mut TreeSpaceEntry::Null = self {
-            *self = TreeSpaceEntry::FloatLeaf(BTreeMap::new());
-        }
-
-        let key = NotNaN::new(f).expect("NaN is not allowed");
-
-        match *self {
-            TreeSpaceEntry::FloatLeaf(ref mut map) => {
-                let vec = map.entry(key).or_insert(Vec::new());
-                vec.push(value);
-            }
-            _ => panic!("Incorrect data type! Found float."),
-        }
-    }
-
-    fn add_value_by_string(&mut self, string: String, value: Arc<Value>) {
-        if let &mut TreeSpaceEntry::Null = self {
-            *self = TreeSpaceEntry::StringLeaf(BTreeMap::new());
-        }
-
-        match *self {
-            TreeSpaceEntry::StringLeaf(ref mut map) => {
-                let vec = map.entry(string).or_insert(Vec::new());
-                vec.push(value);
-            }
-            _ => panic!("Incorrect data type! Found String."),
-        }
-    }
-
-    fn add_value_by_bool(&mut self, boolean: bool, value: Arc<Value>) {
-        if let &mut TreeSpaceEntry::Null = self {
-            *self = TreeSpaceEntry::BoolLeaf(BTreeMap::new());
-        }
-
-        match *self {
-            TreeSpaceEntry::BoolLeaf(ref mut map) => {
-                let vec = map.entry(boolean).or_insert(Vec::new());
-                vec.push(value);
-            }
-            _ => panic!("Incorrect data type! Found bool."),
-        }
-    }
-
     fn add_value_by_array(&mut self, _: Vec<Value>, value: Arc<Value>) {
-        if let &mut TreeSpaceEntry::Null = self {
+        if let TreeSpaceEntry::Null = *self {
             *self = TreeSpaceEntry::VecLeaf(Vec::new());
         }
 
@@ -711,17 +140,17 @@ impl TreeSpaceEntry {
     }
 
     fn add_value_by_object(&mut self, map: Map<String, Value>, value: Arc<Value>) {
-        if let &mut TreeSpaceEntry::Null = self {
+        if let TreeSpaceEntry::Null = *self {
             *self = TreeSpaceEntry::Branch(HashMap::new());
         }
 
         match *self {
-            TreeSpaceEntry::Branch(ref mut hashmap) => for (key, val) in map.into_iter() {
+            TreeSpaceEntry::Branch(ref mut hashmap) => for (key, val) in map {
                 let sub_entry = hashmap.entry(key).or_insert(TreeSpaceEntry::Null);
                 match val.clone() {
                     Value::Number(num) => sub_entry.add_value_by_num(num, value.clone()),
-                    Value::Bool(boolean) => sub_entry.add_value_by_bool(boolean, value.clone()),
-                    Value::String(string) => sub_entry.add_value_by_string(string, value.clone()),
+                    Value::Bool(boolean) => sub_entry.add_value(boolean, value.clone()),
+                    Value::String(string) => sub_entry.add_value(string, value.clone()),
                     Value::Array(vec) => sub_entry.add_value_by_array(vec, value.clone()),
                     Value::Object(_) => panic!("Incorrect data type! Found object."),
                     _ => (),
@@ -732,156 +161,193 @@ impl TreeSpaceEntry {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+trait ValueCollection<T> {
+    fn add_value(&mut self, criteria: T, value: Arc<Value>);
+}
 
-    #[derive(Serialize, Deserialize, PartialEq, Eq, Debug)]
-    struct TestStruct {
-        count: i32,
-        name: String,
-    }
+macro_rules! impl_val_collection {
+    ($([$path:ident, $ty:ty])*) => {
+        $(
+            impl ValueCollection<$ty> for TreeSpaceEntry {
+                fn add_value(&mut self, criteria: $ty, value: Arc<Value>) {
+                    if let TreeSpaceEntry::Null = *self {
+                        *self = TreeSpaceEntry::$path(BTreeMap::new());
+                    }
 
-    #[derive(Serialize, Deserialize, PartialEq, Debug)]
-    struct CompoundStruct {
-        person: TestStruct,
-        gpa: f64,
-    }
+                    match *self {
+                        TreeSpaceEntry::$path(ref mut map) => {
+                            let vec = map.entry(criteria).or_insert(Vec::new());
+                            vec.push(value);
+                        }
+                        _ => panic!("Incorrect data type!"),
+                    }
+                }
+            }
+        )*
+    };
+}
 
-    #[test]
-    fn get() {
-        let mut string_entry = TreeSpaceEntry::new();
-        assert_eq!(string_entry.get::<String>(), None);
-        string_entry.add(String::from("Hello World"));
-        assert_eq!(
-            string_entry.get::<String>(),
-            Some(String::from("Hello World"))
-        );
-        assert_ne!(string_entry.get::<String>(), None);
+impl_val_collection!{[IntLeaf, i64] [StringLeaf, String] [BoolLeaf, bool] [FloatLeaf, NotNaN<f64>] }
 
-        let mut test_struct_entry = TreeSpaceEntry::new();
-        test_struct_entry.add(TestStruct {
-            count: 3,
-            name: String::from("Tuan"),
-        });
-        assert_eq!(
-            test_struct_entry.get::<TestStruct>(),
-            Some(TestStruct {
-                count: 3,
-                name: String::from("Tuan"),
-            })
-        );
-
-        let mut compound_struct_entry = TreeSpaceEntry::new();
-        compound_struct_entry.add(CompoundStruct {
-            person: TestStruct {
-                count: 3,
-                name: String::from("Tuan"),
-            },
-            gpa: 3.0,
-        });
-        assert_eq!(
-            compound_struct_entry.get::<CompoundStruct>(),
-            Some(CompoundStruct {
-                person: TestStruct {
-                    count: 3,
-                    name: String::from("Tuan"),
-                },
-                gpa: 3.0,
-            })
-        );
-        assert!(compound_struct_entry.get::<CompoundStruct>().is_some());
-    }
-
-    #[test]
-    fn remove() {
-        let mut entry = TreeSpaceEntry::new();
-        assert_eq!(entry.remove::<String>(), None);
-        entry.add(String::from("Hello World"));
-        assert_eq!(entry.remove::<String>(), Some(String::from("Hello World")));
-        assert_eq!(entry.remove::<String>(), None);
-
-        let mut test_struct_entry = TreeSpaceEntry::new();
-        test_struct_entry.add(TestStruct {
-            count: 3,
-            name: String::from("Tuan"),
-        });
-        assert_eq!(
-            test_struct_entry.remove::<TestStruct>(),
-            Some(TestStruct {
-                count: 3,
-                name: String::from("Tuan"),
-            })
-        );
-        assert_eq!(test_struct_entry.remove::<TestStruct>(), None);
-
-        let mut compound_struct_entry = TreeSpaceEntry::new();
-        compound_struct_entry.add(CompoundStruct {
-            person: TestStruct {
-                count: 3,
-                name: String::from("Tuan"),
-            },
-            gpa: 3.0,
-        });
-        assert_eq!(
-            compound_struct_entry.remove::<CompoundStruct>(),
-            Some(CompoundStruct {
-                person: TestStruct {
-                    count: 3,
-                    name: String::from("Tuan"),
-                },
-                gpa: 3.0,
-            })
-        );
-        assert!(compound_struct_entry.remove::<CompoundStruct>().is_none());
-    }
-
-    #[test]
-    fn get_all() {
-        let mut entry = TreeSpaceEntry::new();
-        assert_eq!(entry.get_all::<String>().count(), 0);
-        entry.add("Hello".to_string());
-        entry.add("World".to_string());
-        assert_eq!(
-            entry.get_all::<String>().collect::<Vec<String>>(),
-            vec!["Hello", "World"]
-        );
-        assert_ne!(entry.get_all::<String>().count(), 0);
-
-        let mut test_struct_entry = TreeSpaceEntry::new();
-        test_struct_entry.add(TestStruct {
-            count: 3,
-            name: String::from("Tuan"),
-        });
-        test_struct_entry.add(TestStruct {
-            count: 5,
-            name: String::from("Duane"),
-        });
-
-        assert_eq!(test_struct_entry.get_all::<TestStruct>().count(), 2);
-        assert_eq!(test_struct_entry.get_all::<TestStruct>().count(), 2);
-    }
-
-    #[test]
-    fn remove_all() {
-        let mut entry = TreeSpaceEntry::new();
-        assert_eq!(entry.remove_all::<String>().len(), 0);
-        entry.add("Hello".to_string());
-        entry.add("World".to_string());
-        assert_eq!(entry.remove_all::<String>(), vec!["Hello", "World"]);
-        assert_eq!(entry.remove_all::<String>().len(), 0);
-
-        let mut test_struct_entry = TreeSpaceEntry::new();
-        test_struct_entry.add(TestStruct {
-            count: 3,
-            name: String::from("Tuan"),
-        });
-        test_struct_entry.add(TestStruct {
-            count: 5,
-            name: String::from("Duane"),
-        });
-
-        assert_eq!(test_struct_entry.remove_all::<TestStruct>().len(), 2);
-        assert_eq!(test_struct_entry.remove_all::<TestStruct>().len(), 0);
+impl ValueCollection<f64> for TreeSpaceEntry {
+    fn add_value(&mut self, criteria: f64, value: Arc<Value>) {
+        self.add_value(
+            NotNaN::new(criteria).expect("cannot add an NaN value"),
+            value,
+        )
     }
 }
+
+// #[cfg(test)]
+// mod tests {
+//     use super::*;
+
+//     #[derive(Serialize, Deserialize, PartialEq, Eq, Debug)]
+//     struct TestStruct {
+//         count: i32,
+//         name: String,
+//     }
+
+//     #[derive(Serialize, Deserialize, PartialEq, Debug)]
+//     struct CompoundStruct {
+//         person: TestStruct,
+//         gpa: f64,
+//     }
+
+//     #[test]
+//     fn get() {
+//         let mut string_entry = TreeSpaceEntry::new();
+//         assert_eq!(string_entry.get::<String>(), None);
+//         string_entry.add(String::from("Hello World"));
+//         assert_eq!(
+//             string_entry.get::<String>(),
+//             Some(String::from("Hello World"))
+//         );
+//         assert_ne!(string_entry.get::<String>(), None);
+
+//         let mut test_struct_entry = TreeSpaceEntry::new();
+//         test_struct_entry.add(TestStruct {
+//             count: 3,
+//             name: String::from("Tuan"),
+//         });
+//         assert_eq!(
+//             test_struct_entry.get::<TestStruct>(),
+//             Some(TestStruct {
+//                 count: 3,
+//                 name: String::from("Tuan"),
+//             })
+//         );
+
+//         let mut compound_struct_entry = TreeSpaceEntry::new();
+//         compound_struct_entry.add(CompoundStruct {
+//             person: TestStruct {
+//                 count: 3,
+//                 name: String::from("Tuan"),
+//             },
+//             gpa: 3.0,
+//         });
+//         assert_eq!(
+//             compound_struct_entry.get::<CompoundStruct>(),
+//             Some(CompoundStruct {
+//                 person: TestStruct {
+//                     count: 3,
+//                     name: String::from("Tuan"),
+//                 },
+//                 gpa: 3.0,
+//             })
+//         );
+//         assert!(compound_struct_entry.get::<CompoundStruct>().is_some());
+//     }
+
+//     #[test]
+//     fn remove() {
+//         let mut entry = TreeSpaceEntry::new();
+//         assert_eq!(entry.remove::<String>(), None);
+//         entry.add(String::from("Hello World"));
+//         assert_eq!(entry.remove::<String>(), Some(String::from("Hello World")));
+//         assert_eq!(entry.remove::<String>(), None);
+
+//         let mut test_struct_entry = TreeSpaceEntry::new();
+//         test_struct_entry.add(TestStruct {
+//             count: 3,
+//             name: String::from("Tuan"),
+//         });
+//         assert_eq!(
+//             test_struct_entry.remove::<TestStruct>(),
+//             Some(TestStruct {
+//                 count: 3,
+//                 name: String::from("Tuan"),
+//             })
+//         );
+//         assert_eq!(test_struct_entry.remove::<TestStruct>(), None);
+
+//         let mut compound_struct_entry = TreeSpaceEntry::new();
+//         compound_struct_entry.add(CompoundStruct {
+//             person: TestStruct {
+//                 count: 3,
+//                 name: String::from("Tuan"),
+//             },
+//             gpa: 3.0,
+//         });
+//         assert_eq!(
+//             compound_struct_entry.remove::<CompoundStruct>(),
+//             Some(CompoundStruct {
+//                 person: TestStruct {
+//                     count: 3,
+//                     name: String::from("Tuan"),
+//                 },
+//                 gpa: 3.0,
+//             })
+//         );
+//         assert!(compound_struct_entry.remove::<CompoundStruct>().is_none());
+//     }
+
+//     #[test]
+//     fn get_all() {
+//         let mut entry = TreeSpaceEntry::new();
+//         assert_eq!(entry.get_all::<String>().count(), 0);
+//         entry.add("Hello".to_string());
+//         entry.add("World".to_string());
+//         assert_eq!(
+//             entry.get_all::<String>().collect::<Vec<String>>(),
+//             vec!["Hello", "World"]
+//         );
+//         assert_ne!(entry.get_all::<String>().count(), 0);
+
+//         let mut test_struct_entry = TreeSpaceEntry::new();
+//         test_struct_entry.add(TestStruct {
+//             count: 3,
+//             name: String::from("Tuan"),
+//         });
+//         test_struct_entry.add(TestStruct {
+//             count: 5,
+//             name: String::from("Duane"),
+//         });
+
+//         assert_eq!(test_struct_entry.get_all::<TestStruct>().count(), 2);
+//         assert_eq!(test_struct_entry.get_all::<TestStruct>().count(), 2);
+//     }
+
+//     #[test]
+//     fn remove_all() {
+//         let mut entry = TreeSpaceEntry::new();
+//         assert_eq!(entry.remove_all::<String>().len(), 0);
+//         entry.add("Hello".to_string());
+//         entry.add("World".to_string());
+//         assert_eq!(entry.remove_all::<String>(), vec!["Hello", "World"]);
+//         assert_eq!(entry.remove_all::<String>().len(), 0);
+
+//         let mut test_struct_entry = TreeSpaceEntry::new();
+//         test_struct_entry.add(TestStruct {
+//             count: 3,
+//             name: String::from("Tuan"),
+//         });
+//         test_struct_entry.add(TestStruct {
+//             count: 5,
+//             name: String::from("Duane"),
+//         });
+
+//         assert_eq!(test_struct_entry.remove_all::<TestStruct>().len(), 2);
+//         assert_eq!(test_struct_entry.remove_all::<TestStruct>().len(), 0);
+//     }
+// }

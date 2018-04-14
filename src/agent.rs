@@ -1,8 +1,8 @@
+use object_space::{ObjectSpace, ObjectSpaceKey, ObjectSpaceRange};
+use serde::{Deserialize, Serialize};
+use std::ops::RangeBounds;
 use std::thread;
 use std::thread::JoinHandle;
-use serde::{Deserialize, Serialize};
-use object_space::{ObjectSpace, ObjectSpaceKey, ObjectSpaceRange};
-use std::collections::range::RangeArgument;
 
 pub trait Agent {
     type Space: ObjectSpace;
@@ -21,7 +21,7 @@ pub trait Agent {
     /// Add a struct to the object space
     fn write<T>(&self, obj: T)
     where
-        for<'de> T: Serialize + Deserialize<'de> + 'static,
+        for<'de> T: Serialize + Deserialize<'de> + Send + 'static,
     {
         self.get_space().write(obj)
     }
@@ -92,7 +92,7 @@ pub trait AgentRange<U> {
     fn try_read_range<T, R>(&self, field: &str, condition: R) -> Option<T>
     where
         for<'de> T: Serialize + Deserialize<'de> + 'static,
-        R: RangeArgument<U> + Clone,
+        R: RangeBounds<U> + Clone,
     {
         self.get_space().try_read_range::<T, R>(field, condition)
     }
@@ -102,7 +102,7 @@ pub trait AgentRange<U> {
     fn read_all_range<'a, T, R>(&'a self, field: &str, condition: R) -> Box<Iterator<Item = T> + 'a>
     where
         for<'de> T: Deserialize<'de> + 'static,
-        R: RangeArgument<U> + Clone,
+        R: RangeBounds<U> + Clone,
         <Self as AgentRange<U>>::Space: 'a,
     {
         self.get_space().read_all_range::<T, R>(field, condition)
@@ -114,7 +114,7 @@ pub trait AgentRange<U> {
     fn read_range<T, R>(&self, field: &str, condition: R) -> T
     where
         for<'de> T: Serialize + Deserialize<'de> + 'static,
-        R: RangeArgument<U> + Clone,
+        R: RangeBounds<U> + Clone,
     {
         self.get_space().read_range::<T, R>(field, condition)
     }
@@ -125,7 +125,7 @@ pub trait AgentRange<U> {
     fn try_take_range<T, R>(&self, field: &str, condition: R) -> Option<T>
     where
         for<'de> T: Serialize + Deserialize<'de> + 'static,
-        R: RangeArgument<U> + Clone,
+        R: RangeBounds<U> + Clone,
     {
         self.get_space().try_take_range::<T, R>(field, condition)
     }
@@ -135,7 +135,7 @@ pub trait AgentRange<U> {
     fn take_all_range<'a, T, R>(&'a self, field: &str, condition: R) -> Box<Iterator<Item = T> + 'a>
     where
         for<'de> T: Deserialize<'de> + 'static,
-        R: RangeArgument<U> + Clone,
+        R: RangeBounds<U> + Clone,
         <Self as AgentRange<U>>::Space: 'a,
     {
         self.get_space().take_all_range::<T, R>(field, condition)
@@ -147,7 +147,7 @@ pub trait AgentRange<U> {
     fn take_range<T, R>(&self, field: &str, condition: R) -> T
     where
         for<'de> T: Serialize + Deserialize<'de> + 'static,
-        R: RangeArgument<U> + Clone,
+        R: RangeBounds<U> + Clone,
     {
         self.get_space().take_range::<T, R>(field, condition)
     }
@@ -164,7 +164,7 @@ pub trait AgentRange<U> {
     /// Add a struct to the object space
     fn write<T>(&self, obj: T)
     where
-        for<'de> T: Serialize + Deserialize<'de> + 'static,
+        for<'de> T: Serialize + Deserialize<'de> + Send + 'static,
     {
         self.get_space().write(obj)
     }
@@ -303,7 +303,7 @@ pub trait AgentKey<U> {
     /// Add a struct to the object space
     fn write<T>(&self, obj: T)
     where
-        for<'de> T: Serialize + Deserialize<'de> + 'static,
+        for<'de> T: Serialize + Deserialize<'de> + Send + 'static,
     {
         self.get_space().write(obj)
     }
