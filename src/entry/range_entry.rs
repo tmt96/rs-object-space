@@ -180,7 +180,7 @@ macro_rules! impl_range_val_collection {
                                 Some(entry) => entry.remove_all_range_helper(field, condition),
                             };
 
-                            for arc in arc_list.iter() {
+                            for arc in &arc_list {
                                 remove_value_arc(field_map, arc);
                             }
                             arc_list

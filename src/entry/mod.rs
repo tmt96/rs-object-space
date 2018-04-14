@@ -1,13 +1,12 @@
 use std::borrow::Borrow;
 use std::collections::{BTreeMap, HashMap};
-use std::iter::IntoIterator;
 use std::iter::empty;
 use std::sync::Arc;
 
 use ordered_float::NotNaN;
-use serde_json::Number;
 use serde_json::map::Map;
 use serde_json::value::Value;
+use serde_json::Number;
 
 mod exact_key_entry;
 pub mod helpers;
@@ -45,13 +44,10 @@ impl TreeSpaceEntry {
     }
 
     pub fn get(&self) -> Option<Value> {
-        match self.get_helper() {
-            Some(arc) => {
-                let val: &Value = arc.borrow();
-                Some(val.clone())
-            }
-            None => None,
-        }
+        self.get_helper().map(|arc| {
+            let val: &Value = arc.borrow();
+            val.clone()
+        })
     }
 
     pub fn get_all<'a>(&'a self) -> Box<Iterator<Item = Value> + 'a> {
@@ -65,23 +61,19 @@ impl TreeSpaceEntry {
                 let val: &Value = item.borrow();
                 val.clone()
             })),
-            TreeSpaceEntry::Branch(ref object_field_map) => {
-                if let Some((_, value)) = object_field_map.iter().next() {
-                    return value.get_all();
-                }
-                Box::new(empty())
-            }
+            TreeSpaceEntry::Branch(ref object_field_map) => object_field_map
+                .iter()
+                .next()
+                .map_or(Box::new(empty()), |(_, value)| value.get_all()),
         }
     }
 
     pub fn remove(&mut self) -> Option<Value> {
-        match self.remove_helper() {
-            Some(arc) => Arc::try_unwrap(arc).ok(),
-            None => None,
-        }
+        self.remove_helper()
+            .and_then(|arc| Arc::try_unwrap(arc).ok())
     }
 
-    pub fn remove_all<'a>(&'a mut self) -> Vec<Value> {
+    pub fn remove_all(&mut self) -> Vec<Value> {
         let result = self.get_all().collect();
         match *self {
             TreeSpaceEntry::BoolLeaf(ref mut bool_map) => *bool_map = BTreeMap::new(),
@@ -137,7 +129,7 @@ impl TreeSpaceEntry {
     }
 
     fn add_value_by_array(&mut self, _: Vec<Value>, value: Arc<Value>) {
-        if let &mut TreeSpaceEntry::Null = self {
+        if let TreeSpaceEntry::Null = *self {
             *self = TreeSpaceEntry::VecLeaf(Vec::new());
         }
 
@@ -148,12 +140,12 @@ impl TreeSpaceEntry {
     }
 
     fn add_value_by_object(&mut self, map: Map<String, Value>, value: Arc<Value>) {
-        if let &mut TreeSpaceEntry::Null = self {
+        if let TreeSpaceEntry::Null = *self {
             *self = TreeSpaceEntry::Branch(HashMap::new());
         }
 
         match *self {
-            TreeSpaceEntry::Branch(ref mut hashmap) => for (key, val) in map.into_iter() {
+            TreeSpaceEntry::Branch(ref mut hashmap) => for (key, val) in map {
                 let sub_entry = hashmap.entry(key).or_insert(TreeSpaceEntry::Null);
                 match val.clone() {
                     Value::Number(num) => sub_entry.add_value_by_num(num, value.clone()),
@@ -178,7 +170,7 @@ macro_rules! impl_val_collection {
         $(
             impl ValueCollection<$ty> for TreeSpaceEntry {
                 fn add_value(&mut self, criteria: $ty, value: Arc<Value>) {
-                    if let &mut TreeSpaceEntry::Null = self {
+                    if let TreeSpaceEntry::Null = *self {
                         *self = TreeSpaceEntry::$path(BTreeMap::new());
                     }
 

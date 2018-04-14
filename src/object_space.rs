@@ -450,6 +450,7 @@ type Lock = Arc<(Mutex<bool>, Condvar)>;
 /// and the `Vec` of structs containing the corresponding value of such field.
 ///
 /// `Mutex` is used sparingly to ensure blocking `read` and `take` calls do not hijack CPU cycles
+#[derive(Default)]
 pub struct TreeObjectSpace {
     typeid_entries_dict: CHashMap<TypeId, TreeSpaceEntry>,
     lock_dict: CHashMap<TypeId, Lock>,
@@ -457,13 +458,10 @@ pub struct TreeObjectSpace {
 
 impl TreeObjectSpace {
     pub fn new() -> TreeObjectSpace {
-        TreeObjectSpace {
-            typeid_entries_dict: CHashMap::new(),
-            lock_dict: CHashMap::new(),
-        }
+        Default::default()
     }
 
-    fn get_object_entry_ref<'a, T>(&'a self) -> Option<ReadGuard<TypeId, TreeSpaceEntry>>
+    fn get_object_entry_ref<T>(&self) -> Option<ReadGuard<TypeId, TreeSpaceEntry>>
     where
         T: 'static,
     {

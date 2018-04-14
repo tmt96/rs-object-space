@@ -128,7 +128,7 @@ macro_rules! impl_key_collection {
                                 Some(entry) => entry.remove_all_key_helper(field, key),
                             };
 
-                            for arc in arc_list.iter() {
+                            for arc in &arc_list {
                                 remove_value_arc(field_map, arc);
                             }
                             arc_list
