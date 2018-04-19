@@ -1,14 +1,14 @@
 use std::borrow::Borrow;
-use std::iter::IntoIterator;
 use std::iter::empty;
+use std::iter::IntoIterator;
 use std::sync::Arc;
 
 use ordered_float::NotNaN;
 use serde_json::value::Value;
 
-use entry::TreeSpaceEntry;
 use entry::helpers::{get_all_prims_key, get_primitive_key, remove_all_prims_key,
                      remove_primitive_key, remove_value_arc};
+use entry::TreeSpaceEntry;
 
 pub trait ExactKeyEntry<U> {
     fn get_key(&self, field: &str, key: &U) -> Option<Value>;
@@ -25,13 +25,10 @@ macro_rules! impl_key_entry {
         $(
             impl ExactKeyEntry<$ty> for TreeSpaceEntry {
                 fn get_key(&self, field: &str, key: &$ty) -> Option<Value> {
-                    match self.get_key_helper(field, key) {
-                        Some(arc) => {
-                            let val: &Value = arc.borrow();
-                            Some(val.clone())
-                        }
-                        None => None,
-                    }
+                    self.get_key_helper(field, key).map(|arc| {                 
+                        let val: &Value = arc.borrow();
+                        val.clone()
+                    }) 
                 }
 
                 fn get_all_key<'a>(&'a self, field: &str, key: &$ty) -> Box<Iterator<Item = Value> + 'a> {
@@ -39,10 +36,9 @@ macro_rules! impl_key_entry {
                 }
 
                 fn remove_key(&mut self, field: &str, key: &$ty) -> Option<Value> {
-                    match self.remove_key_helper(field, key) {
-                        Some(arc) => Arc::try_unwrap(arc).ok(),
-                        None => None,
-                    }
+                    self
+                        .remove_key_helper(field, key)
+                        .and_then(|arc| Arc::try_unwrap(arc).ok())
                 }
 
                 fn remove_all_key<'a>(&'a mut self, field: &str, key: &$ty) -> Vec<Value> {
@@ -76,10 +72,9 @@ macro_rules! impl_key_collection {
                     match *self {
                         TreeSpaceEntry::Null => None,
                         TreeSpaceEntry::$path(ref map) => get_primitive_key(map, key),
-                        TreeSpaceEntry::Branch(ref field_map) => match field_map.get(field) {
-                            Some(entry) => entry.get_key_helper("", key),
-                            None => panic!("No such field found!"),
-                        },
+                        TreeSpaceEntry::Branch(ref field_map) => field_map
+                            .get(field)
+                            .and_then(|entry| entry.get_key_helper("", key)),
                         _ => panic!("Not correct type"),
                     }
                 }
@@ -88,10 +83,12 @@ macro_rules! impl_key_collection {
                     match *self {
                         TreeSpaceEntry::Null => Box::new(empty()),
                         TreeSpaceEntry::$path(ref int_map) => get_all_prims_key(int_map, &key),
-                        TreeSpaceEntry::Branch(ref field_map) => match field_map.get(field) {
-                            Some(entry) => entry.get_all_key_helper("", key),
-                            None => panic!("No such field found!"),
-                        },
+                        TreeSpaceEntry::Branch(ref field_map) => field_map
+                            .get(field)
+                            .map_or(
+                                Box::new(empty()),
+                                |entry| entry.get_all_key_helper("", key)
+                            ),
                         _ => panic!("Not an int type or a struct holding an int"),
                     }
                 }
@@ -101,20 +98,13 @@ macro_rules! impl_key_collection {
                     match *self {
                         TreeSpaceEntry::Null => None,
                         TreeSpaceEntry::$path(ref mut map) => remove_primitive_key(map, key),
-                        TreeSpaceEntry::Branch(ref mut object_field_map) => {
-                            let arc = match object_field_map.get_mut(field) {
-                                None => panic!("Field {} does not exist", field),
-                                Some(entry) => entry.remove_key_helper(field, key),
-                            };
-
-                            match arc {
-                                Some(arc) => {
-                                    remove_value_arc(object_field_map, &arc);
-                                    Some(arc)
-                                }
-                                None => None,
-                            }
-                        }
+                        TreeSpaceEntry::Branch(ref mut field_map) => field_map
+                                .get_mut(field)
+                                .and_then(|entry| entry.remove_key_helper(field, key))
+                                .map(|arc| {
+                                    remove_value_arc(field_map, &arc);
+                                    arc
+                                }),
                         _ => panic!("Not correct type"),
                     }
                 }
@@ -123,16 +113,19 @@ macro_rules! impl_key_collection {
                         TreeSpaceEntry::Null => Vec::new(),
                         TreeSpaceEntry::$path(ref mut map) => remove_all_prims_key(map, key),
                         TreeSpaceEntry::Branch(ref mut field_map) => {
-                            let arc_list = match field_map.get_mut(field) {
-                                None => panic!("Field {} does not exist", field),
-                                Some(entry) => entry.remove_all_key_helper(field, key),
-                            };
+                            let arc_list = field_map
+                                .get_mut(field)
+                                .map_or(
+                                    Vec::new(),
+                                    |entry| entry.remove_all_key_helper("", key)
+                                );
 
                             for arc in &arc_list {
                                 remove_value_arc(field_map, arc);
                             }
                             arc_list
                         }
+
                         _ => panic!("Not an correct type"),
                     }
                 }

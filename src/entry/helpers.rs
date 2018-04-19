@@ -167,33 +167,35 @@ pub fn remove_object(field_map: &mut HashMap<String, TreeSpaceEntry>) -> Option<
 }
 
 pub fn remove_value_arc(field_map: &mut HashMap<String, TreeSpaceEntry>, removed_arc: &Arc<Value>) {
-    for (k, field) in field_map.iter_mut() {
-        let component = (*removed_arc).get(k).unwrap();
-        match *field {
-            TreeSpaceEntry::BoolLeaf(ref mut lookup_map) => {
-                if let Some(vec) = lookup_map.get_mut(&component.as_bool().unwrap()) {
+    if let Value::Object(ref map) = (*removed_arc).as_ref() {
+        for (field, value) in map {
+            let mut branch = field_map.get_mut(field).expect("No such field name found");
+            match *branch {
+                TreeSpaceEntry::BoolLeaf(ref mut lookup_map) => {
+                    if let Some(vec) = lookup_map.get_mut(&value.as_bool().unwrap()) {
+                        vec.retain(|arc| !Arc::ptr_eq(arc, &removed_arc))
+                    }
+                }
+                TreeSpaceEntry::IntLeaf(ref mut lookup_map) => {
+                    if let Some(vec) = lookup_map.get_mut(&value.as_i64().unwrap()) {
+                        vec.retain(|arc| !Arc::ptr_eq(arc, &removed_arc))
+                    }
+                }
+                TreeSpaceEntry::FloatLeaf(ref mut lookup_map) => {
+                    if let Some(vec) = lookup_map.get_mut(&NotNaN::from(value.as_f64().unwrap())) {
+                        vec.retain(|arc| !Arc::ptr_eq(arc, &removed_arc))
+                    }
+                }
+                TreeSpaceEntry::StringLeaf(ref mut lookup_map) => {
+                    if let Some(vec) = lookup_map.get_mut(value.as_str().unwrap()) {
+                        vec.retain(|arc| !Arc::ptr_eq(arc, &removed_arc))
+                    }
+                }
+                TreeSpaceEntry::VecLeaf(ref mut vec) => {
                     vec.retain(|arc| !Arc::ptr_eq(arc, &removed_arc))
                 }
+                _ => (),
             }
-            TreeSpaceEntry::IntLeaf(ref mut lookup_map) => {
-                if let Some(vec) = lookup_map.get_mut(&component.as_i64().unwrap()) {
-                    vec.retain(|arc| !Arc::ptr_eq(arc, &removed_arc))
-                }
-            }
-            TreeSpaceEntry::FloatLeaf(ref mut lookup_map) => {
-                if let Some(vec) = lookup_map.get_mut(&NotNaN::from(component.as_f64().unwrap())) {
-                    vec.retain(|arc| !Arc::ptr_eq(arc, &removed_arc))
-                }
-            }
-            TreeSpaceEntry::StringLeaf(ref mut lookup_map) => {
-                if let Some(vec) = lookup_map.get_mut(component.as_str().unwrap()) {
-                    vec.retain(|arc| !Arc::ptr_eq(arc, &removed_arc))
-                }
-            }
-            TreeSpaceEntry::VecLeaf(ref mut vec) => {
-                vec.retain(|arc| !Arc::ptr_eq(arc, &removed_arc))
-            }
-            _ => (),
         }
     }
 }

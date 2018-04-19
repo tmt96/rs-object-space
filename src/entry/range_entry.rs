@@ -1,15 +1,15 @@
 use std::borrow::Borrow;
-use std::iter::IntoIterator;
 use std::iter::empty;
+use std::iter::IntoIterator;
 use std::ops::RangeBounds;
 use std::sync::Arc;
 
 use ordered_float::NotNaN;
 use serde_json::value::Value;
 
-use entry::TreeSpaceEntry;
 use entry::helpers::{convert_float_range, get_all_prims_range, get_primitive_range,
                      remove_all_prims_range, remove_primitive_range, remove_value_arc};
+use entry::TreeSpaceEntry;
 
 pub trait RangeEntry<U> {
     fn get_range<R>(&self, field: &str, condition: R) -> Option<Value>
@@ -41,13 +41,12 @@ macro_rules! impl_range_entry {
                 where
                     R: RangeBounds<$ty>,
                 {
-                    match self.get_range_helper(field, condition) {
-                        Some(arc) => {
+                    self
+                        .get_range_helper(field, condition)
+                        .and_then(|arc| {
                             let val: &Value = arc.borrow();
-                            Some(val.clone())
-                        }
-                        None => None,
-                    }
+                            Some(val.clone())                            
+                        })
                 }
 
                 fn get_all_range<'a, R>(&'a self, field: &str, condition: R) -> Box<Iterator<Item = Value> + 'a>
@@ -61,10 +60,9 @@ macro_rules! impl_range_entry {
                 where
                     R: RangeBounds<$ty>,
                 {
-                    match self.remove_range_helper(field, condition) {
-                        Some(arc) => Arc::try_unwrap(arc).ok(),
-                        None => None,
-                    }
+                    self
+                        .remove_range_helper(field, condition)
+                        .and_then(|arc| Arc::try_unwrap(arc).ok())
                 }
 
                 fn remove_all_range<'a, R>(&'a mut self, field: &str, condition: R) -> Vec<Value>
@@ -117,10 +115,9 @@ macro_rules! impl_range_val_collection {
                     match *self {
                         TreeSpaceEntry::Null => None,
                         TreeSpaceEntry::$path(ref map) => get_primitive_range(map, condition),
-                        TreeSpaceEntry::Branch(ref field_map) => match field_map.get(field) {
-                            Some(entry) => entry.get_range_helper("", condition),
-                            None => panic!("No such field found!"),
-                        },
+                        TreeSpaceEntry::Branch(ref field_map) => field_map
+                            .get(field)
+                            .and_then(|entry| entry.get_range_helper("", condition)),
                         _ => panic!("Not correct type"),
                     }
                 }
@@ -134,10 +131,12 @@ macro_rules! impl_range_val_collection {
                         TreeSpaceEntry::$path(ref map) => {
                             get_all_prims_range(map, condition)
                         }
-                        TreeSpaceEntry::Branch(ref field_map) => match field_map.get(field) {
-                            Some(entry) => entry.get_all_range_helper("", condition),
-                            None => panic!("No such field found!"),
-                        },
+                        TreeSpaceEntry::Branch(ref field_map) => field_map
+                            .get(field)
+                            .map_or(
+                                Box::new(empty()),
+                                |entry| entry.get_all_range_helper("", condition)
+                            ),
                         _ => panic!("Not an int type or a struct holding an int"),
                     }
                 }
@@ -150,18 +149,13 @@ macro_rules! impl_range_val_collection {
                         TreeSpaceEntry::Null => None,
                         TreeSpaceEntry::$path(ref mut map) => remove_primitive_range(map, condition),
                         TreeSpaceEntry::Branch(ref mut object_field_map) => {
-                            let arc = match object_field_map.get_mut(field) {
-                                None => panic!("Field {} does not exist", field),
-                                Some(entry) => entry.remove_range_helper(field, condition),
-                            };
-
-                            match arc {
-                                Some(arc) => {
+                            object_field_map
+                                .get_mut(field)
+                                .and_then(|entry| entry.remove_range_helper(field, condition))
+                                .map(|arc| {
                                     remove_value_arc(object_field_map, &arc);
-                                    Some(arc)
-                                }
-                                None => None,
-                            }
+                                    arc
+                                })
                         }
                         _ => panic!("Not correct type"),
                     }
@@ -175,10 +169,12 @@ macro_rules! impl_range_val_collection {
                         TreeSpaceEntry::Null => Vec::new(),
                         TreeSpaceEntry::$path(ref mut map) => remove_all_prims_range(map, condition),
                         TreeSpaceEntry::Branch(ref mut field_map) => {
-                            let arc_list = match field_map.get_mut(field) {
-                                None => panic!("Field {} does not exist", field),
-                                Some(entry) => entry.remove_all_range_helper(field, condition),
-                            };
+                            let arc_list = field_map
+                                .get_mut(field)
+                                .map_or(
+                                    Vec::new(),
+                                    |entry| entry.remove_all_range_helper(field, condition)
+                                 );
 
                             for arc in &arc_list {
                                 remove_value_arc(field_map, arc);

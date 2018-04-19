@@ -878,6 +878,13 @@ mod tests {
         gpa: f64,
     }
 
+    #[derive(Serialize, Deserialize, PartialEq, Debug)]
+    enum TestEnum {
+        String(String),
+        Int(i32),
+        Struct { count: i32, name: String },
+    }
+
     #[test]
     fn try_read() {
         let space = TreeObjectSpace::new();
@@ -1508,5 +1515,38 @@ mod tests {
                 .count(),
             1
         );
+    }
+
+    #[test]
+    fn read_enum_range() {
+        let space = TreeObjectSpace::new();
+        assert_eq!(space.read_all::<TestEnum>().count(), 0);
+        space.write(TestEnum::Int(4));
+        assert_eq!(space.read::<TestEnum>(), TestEnum::Int(4));
+        assert_eq!(space.try_read_key::<TestEnum>("Struct.count", &4), None);
+        assert_eq!(
+            space.try_read_range::<TestEnum, _>("Struct.count", 3..5),
+            None
+        );
+
+        space.write(TestEnum::Struct {
+            count: 4,
+            name: String::from("Tuan"),
+        });
+        assert_eq!(
+            space.read_key::<TestEnum>("Struct.count", &4),
+            TestEnum::Struct {
+                count: 4,
+                name: String::from("Tuan")
+            }
+        );
+        assert_eq!(
+            space.take_range::<TestEnum, _>("Struct.count", 3..5),
+            TestEnum::Struct {
+                count: 4,
+                name: String::from("Tuan")
+            }
+        );
+        assert_eq!(space.read::<TestEnum>(), TestEnum::Int(4));
     }
 }
