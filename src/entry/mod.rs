@@ -11,7 +11,7 @@ use serde_json::Number;
 
 mod exact_key_entry;
 pub mod helpers;
-mod indexer;
+pub mod indexer;
 mod range_entry;
 
 use self::helpers::{get_all_prims_from_map, get_primitive_from_map, remove_object,
@@ -175,7 +175,7 @@ impl EfficientEntry {
         EfficientEntry {
             counter: 0,
             value_map: IndexMap::new(),
-            indexer: ValueIndexer::Null,
+            indexer: ValueIndexer::new(),
         }
     }
 
@@ -215,6 +215,20 @@ impl EfficientEntry {
     fn add_value_to_list(&mut self, arc: Arc<Value>) {
         self.counter += 1;
         self.value_map.entry(self.counter).or_insert(arc);
+    }
+
+    fn get_value_from_index(&self, index: &u64) -> Option<Value> {
+        self.value_map.get(index).map(|arc| {
+            let val: &Value = arc.borrow();
+            val.clone()
+        })
+    }
+
+    fn remove_value_from_index(&mut self, index: &u64) -> Option<Value> {
+        self.value_map.remove(index).map(|arc| {
+            let val: &Value = arc.borrow();
+            val.clone()
+        })
     }
 }
 

@@ -8,7 +8,8 @@ use serde_json::value::Value;
 
 use entry::helpers::{get_all_prims_key, get_primitive_key, remove_all_prims_key,
                      remove_primitive_key, remove_value_arc};
-use entry::TreeSpaceEntry;
+use entry::indexer::KeyedIndexer;
+use entry::{EfficientEntry, TreeSpaceEntry};
 
 pub trait ExactKeyEntry<U> {
     fn get_key(&self, field: &str, key: &U) -> Option<Value>;
@@ -17,7 +18,7 @@ pub trait ExactKeyEntry<U> {
 
     fn remove_key(&mut self, field: &str, key: &U) -> Option<Value>;
 
-    fn remove_all_key<'a>(&'a mut self, field: &str, key: &U) -> Vec<Value>;
+    fn remove_all_key(&mut self, field: &str, key: &U) -> Vec<Value>;
 }
 
 macro_rules! impl_key_entry {
@@ -41,7 +42,7 @@ macro_rules! impl_key_entry {
                         .and_then(|arc| Arc::try_unwrap(arc).ok())
                 }
 
-                fn remove_all_key<'a>(&'a mut self, field: &str, key: &$ty) -> Vec<Value> {
+                fn remove_all_key(&mut self, field: &str, key: &$ty) -> Vec<Value> {
                     self.remove_all_key_helper(field, key)
                         .into_iter()
                         .filter_map(|arc| Arc::try_unwrap(arc).ok())
@@ -52,7 +53,49 @@ macro_rules! impl_key_entry {
     };
 }
 
+macro_rules! impl_efficient_key_entry {
+    ($($ty:ty)*) => {
+        $(            
+            impl ExactKeyEntry<$ty> for EfficientEntry {
+                fn get_key(&self, field: &str, key: &$ty) -> Option<Value> {
+                    let index = self.indexer.get_index_by_key(field, key);
+                    index.and_then(|i| self.get_value_from_index(&i))
+                }
+
+                fn get_all_key<'a>(&'a self, field: &str, key: &$ty) -> Box<Iterator<Item = Value> + 'a> {
+                    let indices = self.indexer.get_all_indices_by_key(field, key);
+                    Box::new(
+                        indices.filter_map(move |i| self.get_value_from_index(&i))
+                    )
+                }
+
+                fn remove_key(&mut self, field: &str, key: &$ty) -> Option<Value> {
+                    let index = self.indexer.get_index_by_key(field, key);
+                    index.and_then(|i| {
+                        let val = self.remove_value_from_index(&i);
+                        val.clone().map(|val| self.indexer.remove(i, &val));
+                        val
+                    })
+                }
+
+                fn remove_all_key(&mut self, field: &str, key: &$ty) -> Vec<Value> {
+                    let indices: Vec<u64> = self.indexer.get_all_indices_by_key(field, key).collect();
+                    indices
+                        .into_iter()
+                        .filter_map(|i| {
+                            let val = self.remove_value_from_index(&i);
+                            val.clone().map(|val| self.indexer.remove(i, &val));
+                            val
+                        })
+                        .collect::<Vec<Value>>()
+                }
+            }
+        )*
+    };
+}
+
 impl_key_entry!{i64 String bool f64}
+impl_efficient_key_entry!{i64 String bool f64}
 
 trait KeyValueCollection<T> {
     fn get_key_helper(&self, field: &str, key: &T) -> Option<Arc<Value>>;

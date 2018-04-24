@@ -9,7 +9,8 @@ use serde_json::value::Value;
 
 use entry::helpers::{convert_float_range, get_all_prims_range, get_primitive_range,
                      remove_all_prims_range, remove_primitive_range, remove_value_arc};
-use entry::TreeSpaceEntry;
+use entry::indexer::RangedIndexer;
+use entry::{EfficientEntry, TreeSpaceEntry};
 
 pub trait RangeEntry<U> {
     fn get_range<R>(&self, field: &str, condition: R) -> Option<Value>
@@ -79,7 +80,57 @@ macro_rules! impl_range_entry {
     };
 }
 
+macro_rules! impl_efficient_range_entry {
+    ($($ty:ty)*) => {
+        $(            
+            impl RangeEntry<$ty> for EfficientEntry {
+                fn get_range<R>(&self, field: &str, range: R) -> Option<Value> 
+                where R: RangeBounds<$ty>
+                {
+                    let index = self.indexer.get_index_by_range(field, range);
+                    index.and_then(|i| self.get_value_from_index(&i))
+                }
+
+                fn get_all_range<'a, R>(&'a self, field: &str, range: R) -> Box<Iterator<Item = Value> + 'a> 
+                where R: RangeBounds<$ty>
+                {
+                    let indices = self.indexer.get_all_indices_by_range(field, range);
+                    Box::new(
+                        indices.filter_map(move |i| self.get_value_from_index(&i))
+                    )
+                }
+
+                fn remove_range<R>(&mut self, field: &str, range: R) -> Option<Value> 
+                where R: RangeBounds<$ty>
+                {
+                    let index = self.indexer.get_index_by_range(field, range);
+                    index.and_then(|i| {
+                        let val = self.remove_value_from_index(&i);
+                        val.clone().map(|val| self.indexer.remove(i, &val));
+                        val
+                    })
+                }
+
+                fn remove_all_range<R>(&mut self, field: &str, range: R) -> Vec<Value> 
+                where R: RangeBounds<$ty>
+                {
+                    let indices: Vec<u64> = self.indexer.get_all_indices_by_range(field, range).collect();
+                    indices
+                        .into_iter()
+                        .filter_map(|i| {
+                            let val = self.remove_value_from_index(&i);
+                            val.clone().map(|val| self.indexer.remove(i, &val));
+                            val
+                        })
+                        .collect::<Vec<Value>>()
+                }
+            }
+        )*
+    };
+}
+
 impl_range_entry!{i64 String f64}
+impl_efficient_range_entry!{i64 String f64}
 
 trait RangeValueCollection<T> {
     fn get_range_helper<R>(&self, field: &str, condition: R) -> Option<Arc<Value>>

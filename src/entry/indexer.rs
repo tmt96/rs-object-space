@@ -1,11 +1,14 @@
 use std::collections::{BTreeMap, HashMap};
 use std::iter::empty;
+use std::ops::RangeBounds;
 
 use indexmap::IndexSet;
 use ordered_float::NotNaN;
 use serde_json::map::Map;
 use serde_json::value::Value;
 use serde_json::Number;
+
+use entry::helpers::convert_float_range;
 
 pub enum ValueIndexer {
     FloatLeaf(BTreeMap<NotNaN<f64>, IndexSet<u64>>),
@@ -181,23 +184,20 @@ impl Indexer<f64> for ValueIndexer {
 }
 
 pub trait KeyedIndexer<T> {
-    fn get_index_by_key(&self, field: &str, key: &T) -> Option<&u64>;
+    fn get_index_by_key(&self, field: &str, key: &T) -> Option<u64>;
 
-    fn get_all_indices_by_key<'a>(
-        &'a self,
-        field: &str,
-        key: &T,
-    ) -> Box<Iterator<Item = &u64> + 'a>;
+    fn get_all_indices_by_key<'a>(&'a self, field: &str, key: &T)
+        -> Box<Iterator<Item = u64> + 'a>;
 }
 
 macro_rules! impl_keyed_indexer {
     ($([$path:ident, $ty:ty])*) => {
         $(
             impl KeyedIndexer<$ty> for ValueIndexer {
-                fn get_index_by_key(&self, field: &str, key: &$ty) -> Option<&u64> {
+                fn get_index_by_key(&self, field: &str, key: &$ty) -> Option<u64> {
                     match *self {
                         ValueIndexer::Null => None,
-                        ValueIndexer::$path(ref map) => map.get(key).and_then(|set| set.get_index(0)),
+                        ValueIndexer::$path(ref map) => map.get(key).and_then(|set| set.get_index(0).map(|i| *i)),
                         ValueIndexer::Branch(ref field_map) => field_map
                             .get(field)
                             .and_then(|entry| entry.get_index_by_key("", key)),
@@ -206,13 +206,13 @@ macro_rules! impl_keyed_indexer {
                 }
 
                 fn get_all_indices_by_key<'a>(&'a self, field: &str, key: &$ty)
-                    -> Box<Iterator<Item = &u64> + 'a> {
+                    -> Box<Iterator<Item = u64> + 'a> {
                     match *self {
                         ValueIndexer::Null => Box::new(empty()),
                         ValueIndexer::$path(ref map) => map
                             .get(key)
                             .map_or(
-                                Box::new(empty()), |set| Box::new(set.iter())
+                                Box::new(empty()), |set| Box::new(set.iter().cloned())
                             ),
                         ValueIndexer::Branch(ref field_map) => field_map
                             .get(field)
@@ -222,17 +222,16 @@ macro_rules! impl_keyed_indexer {
                             ),
                         _ => panic!("Not correct type"),
                     }
-
                 }
             }
         )*   
     };
 }
 
-impl_keyed_indexer!{[IntLeaf, i64] [StringLeaf, String] [BoolLeaf, bool] [FloatLeaf, NotNaN<f64>] }
+impl_keyed_indexer!{ [IntLeaf, i64] [StringLeaf, String] [BoolLeaf, bool] [FloatLeaf, NotNaN<f64>] }
 
 impl KeyedIndexer<f64> for ValueIndexer {
-    fn get_index_by_key(&self, field: &str, key: &f64) -> Option<&u64> {
+    fn get_index_by_key(&self, field: &str, key: &f64) -> Option<u64> {
         self.get_index_by_key(
             field,
             &NotNaN::new(*key).expect("NaN value is not accepted"),
@@ -243,10 +242,98 @@ impl KeyedIndexer<f64> for ValueIndexer {
         &'a self,
         field: &str,
         key: &f64,
-    ) -> Box<Iterator<Item = &u64> + 'a> {
+    ) -> Box<Iterator<Item = u64> + 'a> {
         self.get_all_indices_by_key(
             field,
             &NotNaN::new(*key).expect("NaN value is not accepted"),
         )
+    }
+}
+
+pub trait RangedIndexer<T> {
+    fn get_index_by_range<R>(&self, field: &str, range: R) -> Option<u64>
+    where
+        R: RangeBounds<T>;
+
+    fn get_all_indices_by_range<'a, R>(
+        &'a self,
+        field: &str,
+        range: R,
+    ) -> Box<Iterator<Item = u64> + 'a>
+    where
+        R: RangeBounds<T>;
+}
+
+macro_rules! impl_ranged_indexer {
+    ($([$path:ident, $ty:ty])*) => {
+        $(
+            impl RangedIndexer<$ty> for ValueIndexer {
+                fn get_index_by_range<R>(&self, field: &str, range: R) -> Option<u64>
+                where
+                    R: RangeBounds<$ty> 
+                {
+                    match *self {
+                        ValueIndexer::Null => None,
+                        ValueIndexer::$path(ref map) => {
+                            for (_, set) in map.range(range) {
+                                if let Some(i) = set.get_index(0) {
+                                    return Some(*i);
+                                }
+                            }
+                            None
+                        },
+                        ValueIndexer::Branch(ref field_map) => field_map
+                            .get(field)
+                            .and_then(|entry| entry.get_index_by_range::<_>("", range)),
+                        _ => panic!("Not correct type"),
+                    }
+                }
+
+                fn get_all_indices_by_range<'a, R>(
+                    &'a self,
+                    field: &str,
+                    range: R
+                ) -> Box<Iterator<Item = u64> + 'a>
+                where R: RangeBounds<$ty> {
+                    match *self {
+                        ValueIndexer::Null => Box::new(empty()),
+                        ValueIndexer::$path(ref map) => Box::new(
+                            map
+                                .range(range)
+                                .flat_map(|(_, set)| set.iter().cloned())
+                        ),
+                        ValueIndexer::Branch(ref field_map) => field_map
+                            .get(field)
+                            .map_or(
+                                Box::new(empty()),
+                                |entry| entry.get_all_indices_by_range::<_>("", range)
+                            ),
+                        _ => panic!("Not correct type"),
+                    }
+                }                
+            }
+        )*
+    };
+}
+
+impl_ranged_indexer!{ [IntLeaf, i64] [StringLeaf, String] [FloatLeaf, NotNaN<f64>] }
+
+impl RangedIndexer<f64> for ValueIndexer {
+    fn get_index_by_range<R>(&self, field: &str, range: R) -> Option<u64>
+    where
+        R: RangeBounds<f64>,
+    {
+        self.get_index_by_range(field, convert_float_range(range))
+    }
+
+    fn get_all_indices_by_range<'a, R>(
+        &'a self,
+        field: &str,
+        range: R,
+    ) -> Box<Iterator<Item = u64> + 'a>
+    where
+        R: RangeBounds<f64>,
+    {
+        self.get_all_indices_by_range(field, convert_float_range(range))
     }
 }
