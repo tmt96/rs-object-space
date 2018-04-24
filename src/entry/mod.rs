@@ -1,5 +1,5 @@
 use std::borrow::Borrow;
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap};
 use std::iter::empty;
 use std::sync::Arc;
 
@@ -11,11 +11,13 @@ use serde_json::Number;
 
 mod exact_key_entry;
 pub mod helpers;
+mod indexer;
 mod range_entry;
 
 use self::helpers::{get_all_prims_from_map, get_primitive_from_map, remove_object,
                     remove_primitive_from_map};
 pub use entry::exact_key_entry::ExactKeyEntry;
+use entry::indexer::ValueIndexer;
 pub use entry::range_entry::RangeEntry;
 
 pub enum TreeSpaceEntry {
@@ -25,16 +27,6 @@ pub enum TreeSpaceEntry {
     StringLeaf(BTreeMap<String, Vec<Arc<Value>>>),
     VecLeaf(Vec<Arc<Value>>),
     Branch(HashMap<String, TreeSpaceEntry>),
-    Null,
-}
-
-enum ValueIndexer {
-    FloatLeaf(BTreeMap<NotNaN<f64>, HashSet<u64>>),
-    IntLeaf(BTreeMap<i64, HashSet<u64>>),
-    BoolLeaf(BTreeMap<bool, HashSet<u64>>),
-    StringLeaf(BTreeMap<String, HashSet<u64>>),
-    VecLeaf(HashSet<u64>),
-    Branch(HashMap<String, ValueIndexer>),
     Null,
 }
 
@@ -188,20 +180,8 @@ impl EfficientEntry {
     }
 
     pub fn add(&mut self, obj: Value) {
-        match obj.clone() {
-            Value::Number(num) => self.add_value_by_num(num, Arc::new(obj)),
-            Value::Bool(boolean) => self.add_value(boolean, Arc::new(obj)),
-            Value::String(string) => self.add_value(string, Arc::new(obj)),
-            Value::Array(_) => {
-                self.add_value_to_list(Arc::new(obj));
-                self.update_array_indexer()
-            }
-            Value::Object(map) => {
-                self.add_value_to_list(Arc::new(obj));
-                self.update_object_indexer(map)
-            }
-            _ => (),
-        }
+        self.add_value_to_list(Arc::new(obj.clone()));
+        self.indexer.add(obj, self.counter)
     }
 
     pub fn get(&self) -> Option<Value> {
@@ -221,7 +201,7 @@ impl EfficientEntry {
     pub fn remove(&mut self) -> Option<Value> {
         self.value_map.pop().map(|(key, value)| {
             let val: &Value = value.borrow();
-            remove_arc_reference(&mut self.indexer, key, val);
+            self.indexer.remove(key, val);
             val.clone()
         })
     }
@@ -230,121 +210,6 @@ impl EfficientEntry {
         let result = self.get_all().collect();
         *self = EfficientEntry::new();
         result
-    }
-
-    //////////////////////////////////////
-    // PRIVATE METHODS!!
-    //////////////////////////////////////
-    fn add_value_by_num(&mut self, num: Number, value: Arc<Value>) {
-        // only parse as f64 if it is actually f64
-        // (e.g: accept '64.0' but not '64')
-        if num.is_f64() {
-            self.add_value(num.as_f64().unwrap(), value);
-        } else if let Some(i) = num.as_i64() {
-            self.add_value(i, value);
-        } else {
-            panic!("Not a number!");
-        }
-    }
-
-    fn update_array_indexer(&mut self) {
-        if let ValueIndexer::Null = self.indexer {
-            self.indexer = ValueIndexer::VecLeaf(HashSet::new());
-        }
-        match self.indexer {
-            ValueIndexer::VecLeaf(ref mut set) => {
-                set.insert(self.counter);
-            }
-            _ => panic!("Incorrect data type! Found vec."),
-        }
-    }
-
-    // TODO: refactor this method
-    fn update_object_indexer(&mut self, map: Map<String, Value>) {
-        if let ValueIndexer::Null = self.indexer {
-            self.indexer = ValueIndexer::Branch(HashMap::new());
-        }
-
-        match self.indexer {
-            ValueIndexer::Branch(ref mut hashmap) => {
-                for (key, value) in map {
-                    match value.clone() {
-                        Value::Object(_) => panic!("Incorrect data type! Found object."),
-                        Value::Array(_) => {
-                            let indexer = hashmap
-                                .entry(key)
-                                .or_insert(ValueIndexer::VecLeaf(HashSet::new()));
-
-                            match indexer {
-                                ValueIndexer::VecLeaf(ref mut set) => {
-                                    set.insert(self.counter);
-                                }
-                                _ => panic!("Incorrect data type! Found vec."),
-                            }
-                        }
-                        Value::Bool(bool_val) => {
-                            let indexer = hashmap
-                                .entry(key)
-                                .or_insert(ValueIndexer::BoolLeaf(BTreeMap::new()));
-
-                            match indexer {
-                                ValueIndexer::BoolLeaf(ref mut map) => {
-                                    let set = map.entry(bool_val).or_insert(HashSet::new());
-                                    set.insert(self.counter);
-                                }
-                                _ => panic!("Incorrect data type!"),
-                            }
-                        }
-                        Value::String(string) => {
-                            let indexer = hashmap
-                                .entry(key)
-                                .or_insert(ValueIndexer::StringLeaf(BTreeMap::new()));
-
-                            match indexer {
-                                ValueIndexer::StringLeaf(ref mut map) => {
-                                    let set = map.entry(string).or_insert(HashSet::new());
-                                    set.insert(self.counter);
-                                }
-                                _ => panic!("Incorrect data type!"),
-                            }
-                        }
-                        Value::Number(num) => {
-                            if num.is_f64() {
-                                let f = num.as_f64().unwrap();
-                                let f = NotNaN::new(f).expect("cannot add an NaN value");
-                                let indexer = hashmap
-                                    .entry(key)
-                                    .or_insert(ValueIndexer::FloatLeaf(BTreeMap::new()));
-
-                                match indexer {
-                                    ValueIndexer::FloatLeaf(ref mut map) => {
-                                        let set = map.entry(f).or_insert(HashSet::new());
-                                        set.insert(self.counter);
-                                    }
-                                    _ => panic!("Incorrect data type!"),
-                                }
-                            } else if let Some(i) = num.as_i64() {
-                                let indexer = hashmap
-                                    .entry(key)
-                                    .or_insert(ValueIndexer::IntLeaf(BTreeMap::new()));
-
-                                match indexer {
-                                    ValueIndexer::IntLeaf(ref mut map) => {
-                                        let set = map.entry(i).or_insert(HashSet::new());
-                                        set.insert(self.counter);
-                                    }
-                                    _ => panic!("Incorrect data type!"),
-                                }
-                            } else {
-                                panic!("Not a number!");
-                            }
-                        }
-                        _ => (),
-                    }
-                }
-            }
-            _ => panic!("Incorrect data type! Found object."),
-        }
     }
 
     fn add_value_to_list(&mut self, arc: Arc<Value>) {
@@ -379,33 +244,7 @@ macro_rules! impl_val_collection {
     };
 }
 
-macro_rules! impl_efficient_val_collection {
-    ($([$path:ident, $ty:ty])*) => {
-        $(
-            impl ValueCollection<$ty> for EfficientEntry {
-                fn add_value(&mut self, field_value: $ty, arc: Arc<Value>) {
-                    if let ValueIndexer::Null = self.indexer {
-                        self.indexer = ValueIndexer::$path(BTreeMap::new());
-                    }
-
-                    match self.indexer {
-                        ValueIndexer::$path(ref mut map) => {
-                            self.counter += 1;
-                            self.value_map.entry(self.counter).or_insert(arc);
-                            let set = map.entry(field_value).or_insert(HashSet::new());
-                            set.insert(self.counter);
-                        }
-                        _ => panic!("Incorrect data type!"),
-                    }
-                }
-            }
-        )*
-    };
-}
-
 impl_val_collection!{[IntLeaf, i64] [StringLeaf, String] [BoolLeaf, bool] [FloatLeaf, NotNaN<f64>] }
-
-impl_efficient_val_collection!{[IntLeaf, i64] [StringLeaf, String] [BoolLeaf, bool] [FloatLeaf, NotNaN<f64>] }
 
 impl ValueCollection<f64> for TreeSpaceEntry {
     fn add_value(&mut self, field_value: f64, arc: Arc<Value>) {
@@ -413,64 +252,6 @@ impl ValueCollection<f64> for TreeSpaceEntry {
             NotNaN::new(field_value).expect("cannot add an NaN value"),
             arc,
         )
-    }
-}
-
-impl ValueCollection<f64> for EfficientEntry {
-    fn add_value(&mut self, field_value: f64, arc: Arc<Value>) {
-        self.add_value(
-            NotNaN::new(field_value).expect("cannot add an NaN value"),
-            arc,
-        )
-    }
-}
-
-fn remove_arc_reference(value_indexer: &mut ValueIndexer, index: u64, value: &Value) {
-    match *value_indexer {
-        ValueIndexer::BoolLeaf(ref mut map) => match value {
-            Value::Bool(bool_val) => {
-                map.get_mut(bool_val).map(|set| set.remove(&index));
-            }
-            _ => panic!("not correct type! Expect bool value"),
-        },
-        ValueIndexer::StringLeaf(ref mut map) => match value {
-            Value::String(string) => {
-                map.get_mut(string).map(|set| set.remove(&index));
-            }
-            _ => panic!("not correct type! Expect string value"),
-        },
-        ValueIndexer::FloatLeaf(ref mut map) => match value {
-            Value::Number(number) => {
-                if number.is_f64() {
-                    let key =
-                        NotNaN::new(number.as_f64().unwrap()).expect("cannot add an NaN value");
-                    map.get_mut(&key).map(|set| set.remove(&index));
-                }
-            }
-            _ => panic!("not correct type! Expect float value"),
-        },
-        ValueIndexer::IntLeaf(ref mut map) => match value {
-            Value::Number(number) => {
-                if let Some(i) = number.as_i64() {
-                    map.get_mut(&i).map(|set| set.remove(&index));
-                }
-            }
-            _ => panic!("not correct type! Expect int value"),
-        },
-        ValueIndexer::VecLeaf(ref mut set) => {
-            set.remove(&index);
-        }
-        ValueIndexer::Branch(ref mut path_map) => match value {
-            Value::Object(obj) => {
-                for (path, val) in obj {
-                    if let Some(indexer) = path_map.get_mut(path) {
-                        remove_arc_reference(indexer, index, val)
-                    }
-                }
-            }
-            _ => panic!("not correct type! Expect object value"),
-        },
-        _ => (),
     }
 }
 

@@ -108,7 +108,8 @@ macro_rules! impl_key_collection {
                         _ => panic!("Not correct type"),
                     }
                 }
-                fn remove_all_key_helper(&mut self, field: &str, key: &$ty) -> Vec<Arc<Value>> {
+                fn remove_all_key_helper(&mut self, field: &str, key: &$ty)
+                    -> Vec<Arc<Value>> {
                     match *self {
                         TreeSpaceEntry::Null => Vec::new(),
                         TreeSpaceEntry::$path(ref mut map) => remove_all_prims_key(map, key),
