@@ -1,173 +1,18 @@
 use std::borrow::Borrow;
-use std::collections::{BTreeMap, HashMap};
-use std::iter::empty;
+use std::ops::RangeBounds;
 use std::sync::Arc;
 
 use indexmap::IndexMap;
-use ordered_float::NotNaN;
-use serde_json::map::Map;
 use serde_json::value::Value;
-use serde_json::Number;
 
-mod exact_key_entry;
-pub mod helpers;
 pub mod indexer;
-mod range_entry;
 
-use self::helpers::{get_all_prims_from_map, get_primitive_from_map, remove_object,
-                    remove_primitive_from_map};
-pub use entry::exact_key_entry::ExactKeyEntry;
-use entry::indexer::ValueIndexer;
-pub use entry::range_entry::RangeEntry;
-
-pub enum TreeSpaceEntry {
-    FloatLeaf(BTreeMap<NotNaN<f64>, Vec<Arc<Value>>>),
-    IntLeaf(BTreeMap<i64, Vec<Arc<Value>>>),
-    BoolLeaf(BTreeMap<bool, Vec<Arc<Value>>>),
-    StringLeaf(BTreeMap<String, Vec<Arc<Value>>>),
-    VecLeaf(Vec<Arc<Value>>),
-    Branch(HashMap<String, TreeSpaceEntry>),
-    Null,
-}
+use entry::indexer::{KeyedIndexer, RangedIndexer, ValueIndexer};
 
 pub struct EfficientEntry {
     counter: u64,
     value_map: IndexMap<u64, Arc<Value>>,
     indexer: ValueIndexer,
-}
-
-impl TreeSpaceEntry {
-    pub fn new() -> Self {
-        TreeSpaceEntry::Null
-    }
-
-    pub fn add(&mut self, obj: Value) {
-        match obj.clone() {
-            Value::Number(num) => self.add_value_by_num(num, Arc::new(obj)),
-            Value::Bool(boolean) => self.add_value(boolean, Arc::new(obj)),
-            Value::String(string) => self.add_value(string, Arc::new(obj)),
-            Value::Array(vec) => self.add_value_by_array(vec, Arc::new(obj)),
-            Value::Object(map) => self.add_value_by_object(map, Arc::new(obj)),
-            _ => (),
-        }
-    }
-
-    pub fn get(&self) -> Option<Value> {
-        self.get_helper().map(|arc| {
-            let val: &Value = arc.borrow();
-            val.clone()
-        })
-    }
-
-    pub fn get_all<'a>(&'a self) -> Box<Iterator<Item = Value> + 'a> {
-        match *self {
-            TreeSpaceEntry::Null => Box::new(empty()),
-            TreeSpaceEntry::BoolLeaf(ref bool_map) => get_all_prims_from_map(bool_map),
-            TreeSpaceEntry::IntLeaf(ref int_map) => get_all_prims_from_map(int_map),
-            TreeSpaceEntry::FloatLeaf(ref float_map) => get_all_prims_from_map(float_map),
-            TreeSpaceEntry::StringLeaf(ref string_map) => get_all_prims_from_map(string_map),
-            TreeSpaceEntry::VecLeaf(ref vec) => Box::new(vec.iter().map(|item| {
-                let val: &Value = item.borrow();
-                val.clone()
-            })),
-            TreeSpaceEntry::Branch(ref object_field_map) => object_field_map
-                .iter()
-                .next()
-                .map_or(Box::new(empty()), |(_, value)| value.get_all()),
-        }
-    }
-
-    pub fn remove(&mut self) -> Option<Value> {
-        self.remove_helper()
-            .and_then(|arc| Arc::try_unwrap(arc).ok())
-    }
-
-    pub fn remove_all(&mut self) -> Vec<Value> {
-        let result = self.get_all().collect();
-        match *self {
-            TreeSpaceEntry::BoolLeaf(ref mut bool_map) => *bool_map = BTreeMap::new(),
-            TreeSpaceEntry::IntLeaf(ref mut int_map) => *int_map = BTreeMap::new(),
-            TreeSpaceEntry::FloatLeaf(ref mut float_map) => *float_map = BTreeMap::new(),
-            TreeSpaceEntry::StringLeaf(ref mut string_map) => *string_map = BTreeMap::new(),
-            TreeSpaceEntry::VecLeaf(ref mut vec) => *vec = Vec::new(),
-            TreeSpaceEntry::Branch(ref mut object_field_map) => *object_field_map = HashMap::new(),
-            _ => (),
-        }
-        result
-    }
-
-    fn get_helper(&self) -> Option<Arc<Value>> {
-        match *self {
-            TreeSpaceEntry::Null => None,
-            TreeSpaceEntry::BoolLeaf(ref bool_map) => get_primitive_from_map(bool_map),
-            TreeSpaceEntry::IntLeaf(ref int_map) => get_primitive_from_map(int_map),
-            TreeSpaceEntry::FloatLeaf(ref float_map) => get_primitive_from_map(float_map),
-            TreeSpaceEntry::StringLeaf(ref string_map) => get_primitive_from_map(string_map),
-            TreeSpaceEntry::VecLeaf(ref vec) => vec.get(0).map(|res| res.clone()),
-            TreeSpaceEntry::Branch(ref object_field_map) => {
-                if let Some((_, value)) = object_field_map.iter().next() {
-                    return value.get_helper();
-                }
-                None
-            }
-        }
-    }
-
-    fn remove_helper(&mut self) -> Option<Arc<Value>> {
-        match *self {
-            TreeSpaceEntry::Null => None,
-            TreeSpaceEntry::BoolLeaf(ref mut bool_map) => remove_primitive_from_map(bool_map),
-            TreeSpaceEntry::IntLeaf(ref mut int_map) => remove_primitive_from_map(int_map),
-            TreeSpaceEntry::FloatLeaf(ref mut float_map) => remove_primitive_from_map(float_map),
-            TreeSpaceEntry::StringLeaf(ref mut string_map) => remove_primitive_from_map(string_map),
-            TreeSpaceEntry::VecLeaf(ref mut vec) => vec.pop(),
-            TreeSpaceEntry::Branch(ref mut object_field_map) => remove_object(object_field_map),
-        }
-    }
-
-    fn add_value_by_num(&mut self, num: Number, value: Arc<Value>) {
-        // only parse as f64 if it is actually f64
-        // (e.g: accept '64.0' but not '64')
-        if num.is_f64() {
-            self.add_value(num.as_f64().unwrap(), value);
-        } else if let Some(i) = num.as_i64() {
-            self.add_value(i, value);
-        } else {
-            panic!("Not a number!");
-        }
-    }
-
-    fn add_value_by_array(&mut self, _: Vec<Value>, value: Arc<Value>) {
-        if let TreeSpaceEntry::Null = *self {
-            *self = TreeSpaceEntry::VecLeaf(Vec::new());
-        }
-
-        match *self {
-            TreeSpaceEntry::VecLeaf(ref mut vec) => vec.push(value),
-            _ => panic!("Incorrect data type! Found vec."),
-        }
-    }
-
-    fn add_value_by_object(&mut self, map: Map<String, Value>, value: Arc<Value>) {
-        if let TreeSpaceEntry::Null = *self {
-            *self = TreeSpaceEntry::Branch(HashMap::new());
-        }
-
-        match *self {
-            TreeSpaceEntry::Branch(ref mut hashmap) => for (key, val) in map {
-                let sub_entry = hashmap.entry(key).or_insert(TreeSpaceEntry::Null);
-                match val.clone() {
-                    Value::Number(num) => sub_entry.add_value_by_num(num, value.clone()),
-                    Value::Bool(boolean) => sub_entry.add_value(boolean, value.clone()),
-                    Value::String(string) => sub_entry.add_value(string, value.clone()),
-                    Value::Array(vec) => sub_entry.add_value_by_array(vec, value.clone()),
-                    Value::Object(_) => panic!("Incorrect data type! Found object."),
-                    _ => (),
-                }
-            },
-            _ => panic!("Incorrect data type! Found object."),
-        }
-    }
 }
 
 impl EfficientEntry {
@@ -232,42 +77,131 @@ impl EfficientEntry {
     }
 }
 
-trait ValueCollection<T> {
-    fn add_value(&mut self, field_value: T, arc: Arc<Value>);
+pub trait ExactKeyEntry<U> {
+    fn get_key(&self, field: &str, key: &U) -> Option<Value>;
+
+    fn get_all_key<'a>(&'a self, field: &str, key: &U) -> Box<Iterator<Item = Value> + 'a>;
+
+    fn remove_key(&mut self, field: &str, key: &U) -> Option<Value>;
+
+    fn remove_all_key(&mut self, field: &str, key: &U) -> Vec<Value>;
 }
 
-macro_rules! impl_val_collection {
-    ($([$path:ident, $ty:ty])*) => {
-        $(
-            impl ValueCollection<$ty> for TreeSpaceEntry {
-                fn add_value(&mut self, field_value: $ty, arc: Arc<Value>) {
-                    if let TreeSpaceEntry::Null = *self {
-                        *self = TreeSpaceEntry::$path(BTreeMap::new());
-                    }
+macro_rules! impl_efficient_key_entry {
+    ($($ty:ty)*) => {
+        $(            
+            impl ExactKeyEntry<$ty> for EfficientEntry {
+                fn get_key(&self, field: &str, key: &$ty) -> Option<Value> {
+                    let index = self.indexer.get_index_by_key(field, key);
+                    index.and_then(|i| self.get_value_from_index(&i))
+                }
 
-                    match *self {
-                        TreeSpaceEntry::$path(ref mut map) => {
-                            let vec = map.entry(field_value).or_insert(Vec::new());
-                            vec.push(arc);
-                        }
-                        _ => panic!("Incorrect data type!"),
-                    }
+                fn get_all_key<'a>(&'a self, field: &str, key: &$ty) -> Box<Iterator<Item = Value> + 'a> {
+                    let indices = self.indexer.get_all_indices_by_key(field, key);
+                    Box::new(
+                        indices.filter_map(move |i| self.get_value_from_index(&i))
+                    )
+                }
+
+                fn remove_key(&mut self, field: &str, key: &$ty) -> Option<Value> {
+                    let index = self.indexer.get_index_by_key(field, key);
+                    index.and_then(|i| {
+                        let val = self.remove_value_from_index(&i);
+                        val.clone().map(|val| self.indexer.remove(i, &val));
+                        val
+                    })
+                }
+
+                fn remove_all_key(&mut self, field: &str, key: &$ty) -> Vec<Value> {
+                    let indices: Vec<u64> = self.indexer.get_all_indices_by_key(field, key).collect();
+                    indices
+                        .into_iter()
+                        .filter_map(|i| {
+                            let val = self.remove_value_from_index(&i);
+                            val.clone().map(|val| self.indexer.remove(i, &val));
+                            val
+                        })
+                        .collect::<Vec<Value>>()
                 }
             }
         )*
     };
 }
 
-impl_val_collection!{[IntLeaf, i64] [StringLeaf, String] [BoolLeaf, bool] [FloatLeaf, NotNaN<f64>] }
+impl_efficient_key_entry!{i64 String bool f64}
 
-impl ValueCollection<f64> for TreeSpaceEntry {
-    fn add_value(&mut self, field_value: f64, arc: Arc<Value>) {
-        self.add_value(
-            NotNaN::new(field_value).expect("cannot add an NaN value"),
-            arc,
-        )
-    }
+pub trait RangeEntry<U> {
+    fn get_range<R>(&self, field: &str, condition: R) -> Option<Value>
+    where
+        R: RangeBounds<U>;
+
+    fn get_all_range<'a, R>(
+        &'a self,
+        field: &str,
+        condition: R,
+    ) -> Box<Iterator<Item = Value> + 'a>
+    where
+        R: RangeBounds<U>;
+
+    fn remove_range<R>(&mut self, field: &str, condition: R) -> Option<Value>
+    where
+        R: RangeBounds<U>;
+
+    fn remove_all_range<'a, R>(&'a mut self, field: &str, condition: R) -> Vec<Value>
+    where
+        R: RangeBounds<U>;
 }
+
+macro_rules! impl_efficient_range_entry {
+    ($($ty:ty)*) => {
+        $(            
+            impl RangeEntry<$ty> for EfficientEntry {
+                fn get_range<R>(&self, field: &str, range: R) -> Option<Value> 
+                where R: RangeBounds<$ty>
+                {
+                    let index = self.indexer.get_index_by_range(field, range);
+                    index.and_then(|i| self.get_value_from_index(&i))
+                }
+
+                fn get_all_range<'a, R>(&'a self, field: &str, range: R) -> Box<Iterator<Item = Value> + 'a> 
+                where R: RangeBounds<$ty>
+                {
+                    let indices = self.indexer.get_all_indices_by_range(field, range);
+                    Box::new(
+                        indices.filter_map(move |i| self.get_value_from_index(&i))
+                    )
+                }
+
+                fn remove_range<R>(&mut self, field: &str, range: R) -> Option<Value> 
+                where R: RangeBounds<$ty>
+                {
+                    let index = self.indexer.get_index_by_range(field, range);
+                    index.and_then(|i| {
+                        let val = self.remove_value_from_index(&i);
+                        val.clone().map(|val| self.indexer.remove(i, &val));
+                        val
+                    })
+                }
+
+                fn remove_all_range<R>(&mut self, field: &str, range: R) -> Vec<Value> 
+                where R: RangeBounds<$ty>
+                {
+                    let indices: Vec<u64> = self.indexer.get_all_indices_by_range(field, range).collect();
+                    indices
+                        .into_iter()
+                        .filter_map(|i| {
+                            let val = self.remove_value_from_index(&i);
+                            val.clone().map(|val| self.indexer.remove(i, &val));
+                            val
+                        })
+                        .collect::<Vec<Value>>()
+                }
+            }
+        )*
+    };
+}
+
+impl_efficient_range_entry!{i64 String f64}
 
 // #[cfg(test)]
 // mod tests {

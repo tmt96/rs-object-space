@@ -6,8 +6,8 @@ use chashmap::{CHashMap, ReadGuard, WriteGuard};
 use serde::{Deserialize, Serialize};
 use serde_json::value::{from_value, to_value};
 
-use entry::helpers::{deflatten, flatten};
 use entry::{EfficientEntry, ExactKeyEntry, RangeEntry};
+use helpers::{deflatten, flatten};
 
 /// Basic interface of an ObjectSpace.
 ///
@@ -1523,6 +1523,10 @@ mod tests {
         assert_eq!(space.read_all::<TestEnum>().count(), 0);
         space.write(TestEnum::Int(4));
         assert_eq!(space.read::<TestEnum>(), TestEnum::Int(4));
+        assert_eq!(
+            space.try_read_key::<TestEnum>("Int", &4),
+            Some(TestEnum::Int(4))
+        );
         assert_eq!(space.try_read_key::<TestEnum>("Struct.count", &4), None);
         assert_eq!(
             space.try_read_range::<TestEnum, _>("Struct.count", 3..5),

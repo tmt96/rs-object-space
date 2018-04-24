@@ -143,4 +143,5 @@ extern crate serde_json;
 pub use self::object_space::*;
 pub mod agent;
 mod entry;
+mod helpers;
 mod object_space;

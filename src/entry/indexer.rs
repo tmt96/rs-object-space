@@ -1,3 +1,4 @@
+use std::collections::Bound;
 use std::collections::{BTreeMap, HashMap};
 use std::iter::empty;
 use std::ops::RangeBounds;
@@ -7,8 +8,6 @@ use ordered_float::NotNaN;
 use serde_json::map::Map;
 use serde_json::value::Value;
 use serde_json::Number;
-
-use entry::helpers::convert_float_range;
 
 pub enum ValueIndexer {
     FloatLeaf(BTreeMap<NotNaN<f64>, IndexSet<u64>>),
@@ -336,4 +335,26 @@ impl RangedIndexer<f64> for ValueIndexer {
     {
         self.get_all_indices_by_range(field, convert_float_range(range))
     }
+}
+
+fn convert_float_bound(bound: Bound<&f64>) -> Bound<NotNaN<f64>> {
+    match bound {
+        Bound::Included(value) => {
+            Bound::Included(NotNaN::new(*value).expect("NaN values are not accepted"))
+        }
+        Bound::Excluded(value) => {
+            Bound::Excluded(NotNaN::new(*value).expect("NaN values are not accepted"))
+        }
+        Bound::Unbounded => Bound::Unbounded,
+    }
+}
+
+fn convert_float_range<R>(range: R) -> (Bound<NotNaN<f64>>, Bound<NotNaN<f64>>)
+where
+    R: RangeBounds<f64>,
+{
+    (
+        convert_float_bound(range.start()),
+        convert_float_bound(range.end()),
+    )
 }
