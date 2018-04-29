@@ -133,7 +133,7 @@ struct Task {
 
 #![feature(collections_range)]
 extern crate chashmap;
-extern crate num_traits;
+extern crate indexmap;
 extern crate ordered_float;
 extern crate serde;
 #[macro_use]
@@ -141,6 +141,7 @@ extern crate serde_derive;
 extern crate serde_json;
 
 pub use self::object_space::*;
-mod object_space;
 pub mod agent;
 mod entry;
+mod helpers;
+mod object_space;

@@ -6,8 +6,8 @@ use chashmap::{CHashMap, ReadGuard, WriteGuard};
 use serde::{Deserialize, Serialize};
 use serde_json::value::{from_value, to_value};
 
-use entry::helpers::{deflatten, flatten};
-use entry::{ExactKeyEntry, RangeEntry, TreeSpaceEntry};
+use entry::{EfficientEntry, ExactKeyEntry, RangeEntry};
+use helpers::{deflatten, flatten};
 
 /// Basic interface of an ObjectSpace.
 ///
@@ -452,7 +452,7 @@ type Lock = Arc<(Mutex<bool>, Condvar)>;
 /// `Mutex` is used sparingly to ensure blocking `read` and `take` calls do not hijack CPU cycles
 #[derive(Default)]
 pub struct TreeObjectSpace {
-    typeid_entries_dict: CHashMap<TypeId, TreeSpaceEntry>,
+    typeid_entries_dict: CHashMap<TypeId, EfficientEntry>,
     lock_dict: CHashMap<TypeId, Lock>,
 }
 
@@ -461,7 +461,7 @@ impl TreeObjectSpace {
         Default::default()
     }
 
-    fn get_object_entry_ref<T>(&self) -> Option<ReadGuard<TypeId, TreeSpaceEntry>>
+    fn get_object_entry_ref<T>(&self) -> Option<ReadGuard<TypeId, EfficientEntry>>
     where
         T: 'static,
     {
@@ -469,7 +469,7 @@ impl TreeObjectSpace {
         self.typeid_entries_dict.get(&type_id)
     }
 
-    fn get_object_entry_mut<T>(&self) -> Option<WriteGuard<TypeId, TreeSpaceEntry>>
+    fn get_object_entry_mut<T>(&self) -> Option<WriteGuard<TypeId, EfficientEntry>>
     where
         T: 'static,
     {
@@ -486,7 +486,7 @@ impl TreeObjectSpace {
     }
 
     fn add_entry(&self, id: TypeId) {
-        let default_value = TreeSpaceEntry::new();
+        let default_value = EfficientEntry::new();
 
         self.typeid_entries_dict
             .upsert(id, || default_value, |_| ());
@@ -876,6 +876,13 @@ mod tests {
     struct CompoundStruct {
         person: TestStruct,
         gpa: f64,
+    }
+
+    #[derive(Serialize, Deserialize, PartialEq, Debug)]
+    enum TestEnum {
+        String(String),
+        Int(i32),
+        Struct { count: i32, name: String },
     }
 
     #[test]
@@ -1508,5 +1515,42 @@ mod tests {
                 .count(),
             1
         );
+    }
+
+    #[test]
+    fn read_enum_range() {
+        let space = TreeObjectSpace::new();
+        assert_eq!(space.read_all::<TestEnum>().count(), 0);
+        space.write(TestEnum::Int(4));
+        assert_eq!(space.read::<TestEnum>(), TestEnum::Int(4));
+        assert_eq!(
+            space.try_read_key::<TestEnum>("Int", &4),
+            Some(TestEnum::Int(4))
+        );
+        assert_eq!(space.try_read_key::<TestEnum>("Struct.count", &4), None);
+        assert_eq!(
+            space.try_read_range::<TestEnum, _>("Struct.count", 3..5),
+            None
+        );
+
+        space.write(TestEnum::Struct {
+            count: 4,
+            name: String::from("Tuan"),
+        });
+        assert_eq!(
+            space.read_key::<TestEnum>("Struct.count", &4),
+            TestEnum::Struct {
+                count: 4,
+                name: String::from("Tuan")
+            }
+        );
+        assert_eq!(
+            space.take_range::<TestEnum, _>("Struct.count", 3..5),
+            TestEnum::Struct {
+                count: 4,
+                name: String::from("Tuan")
+            }
+        );
+        assert_eq!(space.read::<TestEnum>(), TestEnum::Int(4));
     }
 }
