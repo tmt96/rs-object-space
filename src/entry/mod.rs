@@ -114,14 +114,14 @@ macro_rules! impl_efficient_key_entry {
 
                 fn remove_all_key(&mut self, field: &str, key: &$ty) -> Vec<Value> {
                     let indices: Vec<u64> = self.indexer.get_all_indices_by_key(field, key).collect();
-                    indices
-                        .into_iter()
-                        .filter_map(|i| {
-                            let val = self.remove_value_from_index(&i);
-                            val.clone().map(|val| self.indexer.remove(i, &val));
-                            val
-                        })
-                        .collect::<Vec<Value>>()
+                    let mut result = Vec::new();
+                    for i in indices {
+                        if let Some(val) = self.remove_value_from_index(&i) {
+                            self.indexer.remove(i, &val.clone());
+                            result.push(val);
+                        }
+                    }
+                    result
                 }
             }
         )*
@@ -187,14 +187,14 @@ macro_rules! impl_efficient_range_entry {
                 where R: RangeBounds<$ty>
                 {
                     let indices: Vec<u64> = self.indexer.get_all_indices_by_range(field, range).collect();
-                    indices
-                        .into_iter()
-                        .filter_map(|i| {
-                            let val = self.remove_value_from_index(&i);
-                            val.clone().map(|val| self.indexer.remove(i, &val));
-                            val
-                        })
-                        .collect::<Vec<Value>>()
+                    let mut result = Vec::new();
+                    for i in indices {
+                        if let Some(val) = self.remove_value_from_index(&i) {
+                            self.indexer.remove(i, &val.clone());
+                            result.push(val);
+                        }
+                    }
+                    result
                 }
             }
         )*
