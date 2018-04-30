@@ -81,7 +81,7 @@ pub trait Agent {
     }
 }
 
-pub trait AgentRange<U> {
+pub trait RangeLookupAgent<U> {
     type Space: RangeLookupObjectSpace<U>;
 
     fn get_space(&self) -> &Self::Space;
@@ -103,7 +103,7 @@ pub trait AgentRange<U> {
     where
         for<'de> T: Deserialize<'de> + 'static,
         R: RangeBounds<U> + Clone,
-        <Self as AgentRange<U>>::Space: 'a,
+        <Self as RangeLookupAgent<U>>::Space: 'a,
     {
         self.get_space().read_all_by_range::<T, R>(field, range)
     }
@@ -136,7 +136,7 @@ pub trait AgentRange<U> {
     where
         for<'de> T: Deserialize<'de> + 'static,
         R: RangeBounds<U> + Clone,
-        <Self as AgentRange<U>>::Space: 'a,
+        <Self as RangeLookupAgent<U>>::Space: 'a,
     {
         self.get_space().take_all_by_range::<T, R>(field, range)
     }
@@ -183,7 +183,7 @@ pub trait AgentRange<U> {
     fn read_all<'a, T>(&'a self) -> Box<Iterator<Item = T> + 'a>
     where
         for<'de> T: Serialize + Deserialize<'de> + 'static,
-        <Self as AgentRange<U>>::Space: 'a,
+        <Self as RangeLookupAgent<U>>::Space: 'a,
     {
         self.get_space().read_all::<T>()
     }
@@ -211,7 +211,7 @@ pub trait AgentRange<U> {
     fn take_all<'a, T>(&'a self) -> Box<Iterator<Item = T> + 'a>
     where
         for<'de> T: Serialize + Deserialize<'de> + 'static,
-        <Self as AgentRange<U>>::Space: 'a,
+        <Self as RangeLookupAgent<U>>::Space: 'a,
     {
         self.get_space().take_all::<T>()
     }
@@ -226,7 +226,7 @@ pub trait AgentRange<U> {
     }
 }
 
-pub trait AgentKey<U> {
+pub trait ValueLookupAgent<U> {
     type Space: ValueLookupObjectSpace<U>;
 
     fn get_space(&self) -> &Self::Space;
@@ -246,7 +246,7 @@ pub trait AgentKey<U> {
     fn read_all_by_value<'a, T>(&'a self, field: &str, key: &U) -> Box<Iterator<Item = T> + 'a>
     where
         for<'de> T: Deserialize<'de> + 'static,
-        <Self as AgentKey<U>>::Space: 'a,
+        <Self as ValueLookupAgent<U>>::Space: 'a,
     {
         self.get_space().read_all_by_value::<T>(field, key)
     }
@@ -276,7 +276,7 @@ pub trait AgentKey<U> {
     fn take_all_by_value<'a, T>(&'a self, field: &str, key: &U) -> Box<Iterator<Item = T> + 'a>
     where
         for<'de> T: Deserialize<'de> + 'static,
-        <Self as AgentKey<U>>::Space: 'a,
+        <Self as ValueLookupAgent<U>>::Space: 'a,
     {
         self.get_space().take_all_by_value::<T>(field, key)
     }
@@ -322,7 +322,7 @@ pub trait AgentKey<U> {
     fn read_all<'a, T>(&'a self) -> Box<Iterator<Item = T> + 'a>
     where
         for<'de> T: Serialize + Deserialize<'de> + 'static,
-        <Self as AgentKey<U>>::Space: 'a,
+        <Self as ValueLookupAgent<U>>::Space: 'a,
     {
         self.get_space().read_all::<T>()
     }
@@ -350,7 +350,7 @@ pub trait AgentKey<U> {
     fn take_all<'a, T>(&'a self) -> Box<Iterator<Item = T> + 'a>
     where
         for<'de> T: Serialize + Deserialize<'de> + 'static,
-        <Self as AgentKey<U>>::Space: 'a,
+        <Self as ValueLookupAgent<U>>::Space: 'a,
     {
         self.get_space().take_all::<T>()
     }
