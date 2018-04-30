@@ -17,7 +17,7 @@ An ObjectSpace could perform the following tasks:
 
 Notice that an ObjectSpace could hold data from any types, which means that an i64, a String, and a complex struct could all live under one space (which leads to the somewhat wordy API for retrieving items).
 
-Additionally, by implementing `ObjectSpaceKey` and `ObjectSpaceRange`, an ObjectSpace could retrieve item based on the value of a field. Notice that the field must be a "basic" field: the type of the field must be either an int, a string, or a bool.
+Additionally, by implementing `ValueLookupObjectSpace` and `RangeLookupObjectSpace`, an ObjectSpace could retrieve item based on the value of a field. Notice that the field must be a "basic" field: the type of the field must be either an int, a string, or a bool.
 
 E.g: Given a TestStruct:
 
@@ -32,9 +32,9 @@ struct TestStruct {
 }
 ```
 
-`space.try_take_key::<TestStruct>("property.touched", true)` will return a `TestStruct` with the value `true` for `property.touched`. `space.try_take_range::<TestStruct>("index", 2..10)` will return a `TestStruct` with the value of `index` between in the range `2..10`
+`space.try_take_by_value::<TestStruct>("property.touched", true)` will return a `TestStruct` with the value `true` for `property.touched`. `space.try_take_by_range::<TestStruct>("index", 2..10)` will return a `TestStruct` with the value of `index` between in the range `2..10`
 
-For further information, please read the documentation of `ObjectSpace`, `ObjectSpaceRange`, and `ObjectSpaceKey`
+For further information, please read the documentation of `ObjectSpace`, `RangeLookupObjectSpace`, and `ValueLookupObjectSpace`
 
 # TreeObjectSpace
 
@@ -54,7 +54,7 @@ use std::thread;
 use std::env;
 use std::sync::Arc;
 
-use object_space::{ObjectSpace, ObjectSpaceKey, ObjectSpaceRange, TreeObjectSpace};
+use object_space::{ObjectSpace, ValueLookupObjectSpace, RangeLookupObjectSpace, TreeObjectSpace};
 
 fn main() {
     let mut args = env::args();
@@ -97,7 +97,7 @@ fn main() {
         // "joining" threads
         for _ in 0..thread_count {
             let clone = space.clone();
-            clone.take_key::<Task>("finished", &true);
+            clone.take_by_value::<Task>("finished", &true);
         }
         n = max;
     }
@@ -105,7 +105,7 @@ fn main() {
 
 fn check_numbers(space: Arc<TreeObjectSpace>) {
     loop {
-        let task = space.take_key::<Task>("finished", &false);
+        let task = space.take_by_value::<Task>("finished", &false);
         let max = task.end;
         let min = task.start;
         let primes: Vec<i64> = space.read_all::<i64>().filter(|i| i * i < max).collect();

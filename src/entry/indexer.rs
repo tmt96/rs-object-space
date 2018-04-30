@@ -182,29 +182,32 @@ impl Indexer<f64> for ValueIndexer {
     }
 }
 
-pub trait KeyedIndexer<T> {
-    fn get_index_by_key(&self, field: &str, key: &T) -> Option<u64>;
+pub trait ValueLookupIndexer<T> {
+    fn get_index_by_value(&self, field: &str, key: &T) -> Option<u64>;
 
-    fn get_all_indices_by_key<'a>(&'a self, field: &str, key: &T)
-        -> Box<Iterator<Item = u64> + 'a>;
+    fn get_all_indices_by_value<'a>(
+        &'a self,
+        field: &str,
+        key: &T,
+    ) -> Box<Iterator<Item = u64> + 'a>;
 }
 
-macro_rules! impl_keyed_indexer {
+macro_rules! impl_value_lookup_indexer {
     ($([$path:ident, $ty:ty])*) => {
         $(
-            impl KeyedIndexer<$ty> for ValueIndexer {
-                fn get_index_by_key(&self, field: &str, key: &$ty) -> Option<u64> {
+            impl ValueLookupIndexer<$ty> for ValueIndexer {
+                fn get_index_by_value(&self, field: &str, key: &$ty) -> Option<u64> {
                     match *self {
                         ValueIndexer::Null => None,
                         ValueIndexer::$path(ref map) => map.get(key).and_then(|set| set.get_index(0).map(|i| *i)),
                         ValueIndexer::Branch(ref field_map) => field_map
                             .get(field)
-                            .and_then(|entry| entry.get_index_by_key("", key)),
+                            .and_then(|entry| entry.get_index_by_value("", key)),
                         _ => panic!("Not correct type"),
                     }
                 }
 
-                fn get_all_indices_by_key<'a>(&'a self, field: &str, key: &$ty)
+                fn get_all_indices_by_value<'a>(&'a self, field: &str, key: &$ty)
                     -> Box<Iterator<Item = u64> + 'a> {
                     match *self {
                         ValueIndexer::Null => Box::new(empty()),
@@ -217,7 +220,7 @@ macro_rules! impl_keyed_indexer {
                             .get(field)
                             .map_or(
                                 Box::new(empty()),
-                                |entry| entry.get_all_indices_by_key("", key)
+                                |entry| entry.get_all_indices_by_value("", key)
                             ),
                         _ => panic!("Not correct type"),
                     }
@@ -227,29 +230,29 @@ macro_rules! impl_keyed_indexer {
     };
 }
 
-impl_keyed_indexer!{ [IntLeaf, i64] [StringLeaf, String] [BoolLeaf, bool] [FloatLeaf, NotNaN<f64>] }
+impl_value_lookup_indexer!{ [IntLeaf, i64] [StringLeaf, String] [BoolLeaf, bool] [FloatLeaf, NotNaN<f64>] }
 
-impl KeyedIndexer<f64> for ValueIndexer {
-    fn get_index_by_key(&self, field: &str, key: &f64) -> Option<u64> {
-        self.get_index_by_key(
+impl ValueLookupIndexer<f64> for ValueIndexer {
+    fn get_index_by_value(&self, field: &str, key: &f64) -> Option<u64> {
+        self.get_index_by_value(
             field,
             &NotNaN::new(*key).expect("NaN value is not accepted"),
         )
     }
 
-    fn get_all_indices_by_key<'a>(
+    fn get_all_indices_by_value<'a>(
         &'a self,
         field: &str,
         key: &f64,
     ) -> Box<Iterator<Item = u64> + 'a> {
-        self.get_all_indices_by_key(
+        self.get_all_indices_by_value(
             field,
             &NotNaN::new(*key).expect("NaN value is not accepted"),
         )
     }
 }
 
-pub trait RangedIndexer<T> {
+pub trait RangeLookupIndexer<T> {
     fn get_index_by_range<R>(&self, field: &str, range: R) -> Option<u64>
     where
         R: RangeBounds<T>;
@@ -263,10 +266,10 @@ pub trait RangedIndexer<T> {
         R: RangeBounds<T>;
 }
 
-macro_rules! impl_ranged_indexer {
+macro_rules! impl_range_lookup_indexer {
     ($([$path:ident, $ty:ty])*) => {
         $(
-            impl RangedIndexer<$ty> for ValueIndexer {
+            impl RangeLookupIndexer<$ty> for ValueIndexer {
                 fn get_index_by_range<R>(&self, field: &str, range: R) -> Option<u64>
                 where
                     R: RangeBounds<$ty> 
@@ -315,9 +318,9 @@ macro_rules! impl_ranged_indexer {
     };
 }
 
-impl_ranged_indexer!{ [IntLeaf, i64] [StringLeaf, String] [FloatLeaf, NotNaN<f64>] }
+impl_range_lookup_indexer!{ [IntLeaf, i64] [StringLeaf, String] [FloatLeaf, NotNaN<f64>] }
 
-impl RangedIndexer<f64> for ValueIndexer {
+impl RangeLookupIndexer<f64> for ValueIndexer {
     fn get_index_by_range<R>(&self, field: &str, range: R) -> Option<u64>
     where
         R: RangeBounds<f64>,

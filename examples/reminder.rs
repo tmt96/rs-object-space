@@ -4,16 +4,16 @@ extern crate serde;
 #[macro_use]
 extern crate serde_derive;
 
+use std::fmt;
 use std::io::{stdin, stdout, Write};
 use std::process::exit;
-use std::thread;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicIsize, Ordering};
-use std::fmt;
+use std::sync::Arc;
+use std::thread;
 use std::time::Duration;
 
 use chrono::{DateTime, Duration as ChronoDuration, NaiveDateTime, Utc};
-use object_space::{ObjectSpace, ObjectSpaceKey, ObjectSpaceRange, TreeObjectSpace};
+use object_space::{ObjectSpace, RangeLookupObjectSpace, TreeObjectSpace, ValueLookupObjectSpace};
 
 fn main() {
     let store = ReminderStore::new();
@@ -152,7 +152,7 @@ impl ReminderStore {
         time: DateTime<Utc>,
     ) -> Box<Iterator<Item = Reminder> + 'a> {
         self.space
-            .read_all_range::<Reminder, _>("time", Utc::now().timestamp()..time.timestamp())
+            .read_all_by_range::<Reminder, _>("time", Utc::now().timestamp()..time.timestamp())
     }
 
     fn get_reminder_between_time<'a>(
@@ -161,25 +161,25 @@ impl ReminderStore {
         end_time: DateTime<Utc>,
     ) -> Box<Iterator<Item = Reminder> + 'a> {
         self.space
-            .read_all_range::<Reminder, _>("time", start_time.timestamp()..end_time.timestamp())
+            .read_all_by_range::<Reminder, _>("time", start_time.timestamp()..end_time.timestamp())
     }
 
     fn get_all_todo_reminders<'a>(&'a self) -> Box<Iterator<Item = Reminder> + 'a> {
         self.space
-            .read_all_range::<Reminder, _>("time", Utc::now().timestamp()..)
+            .read_all_by_range::<Reminder, _>("time", Utc::now().timestamp()..)
     }
 
     fn get_all_outdated_reminders<'a>(&'a self) -> Box<Iterator<Item = Reminder> + 'a> {
         self.space
-            .read_all_range::<Reminder, _>("time", ..Utc::now().timestamp())
+            .read_all_by_range::<Reminder, _>("time", ..Utc::now().timestamp())
     }
 
     fn complete_reminder(&self, id: isize) -> Option<Reminder> {
-        self.space.try_take_key::<Reminder>("id", &(id as i64))
+        self.space.try_take_by_value::<Reminder>("id", &(id as i64))
     }
 
     fn edit_reminder_content(&self, id: isize, content: &str) {
-        match self.space.try_take_key::<Reminder>("id", &(id as i64)) {
+        match self.space.try_take_by_value::<Reminder>("id", &(id as i64)) {
             Some(Reminder {
                 id: _,
                 time: rtime,
@@ -194,7 +194,7 @@ impl ReminderStore {
     }
 
     fn edit_reminder_time(&self, id: isize, time: DateTime<Utc>) {
-        match self.space.try_take_key::<Reminder>("id", &(id as i64)) {
+        match self.space.try_take_by_value::<Reminder>("id", &(id as i64)) {
             Some(Reminder {
                 id: _,
                 time: _,
@@ -210,7 +210,7 @@ impl ReminderStore {
 
     fn get_next_reminder(&self) -> Option<Reminder> {
         self.space
-            .read_all_range::<Reminder, _>("time", Utc::now().timestamp()..)
+            .read_all_by_range::<Reminder, _>("time", Utc::now().timestamp()..)
             .min_by_key(|r| r.time)
     }
 }
