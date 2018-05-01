@@ -3,7 +3,11 @@ use serde_json::value::Value;
 
 pub fn flatten(v: Value) -> Value {
     match v {
-        Value::Object(map) => Value::Object(flatten_value_map(map)),
+        Value::Object(_) => {
+            let mut result = Map::new();
+            flatten_helper("", v, &mut result);
+            Value::Object(result)
+        }
         _ => v,
     }
 }
@@ -15,21 +19,20 @@ pub fn deflatten(v: Value) -> Value {
     }
 }
 
-fn flatten_value_map(map: Map<String, Value>) -> Map<String, Value> {
-    let mut result = Map::new();
-    for (key, value) in map {
-        match value {
-            Value::Object(obj) => for (k, v) in obj {
-                let new_key = format!("{}.{}", key, k);
-                result.insert(new_key, flatten(v));
-            },
-            _ => {
-                result.insert(key, value);
-                ()
-            }
-        };
+fn flatten_helper(path: &str, value: Value, result: &mut Map<String, Value>) {
+    match value {
+        Value::Object(map) => for (k, v) in map {
+            let new_path = if path.is_empty() {
+                k
+            } else {
+                format!("{}.{}", path, k)
+            };
+            flatten_helper(&new_path, v, result)
+        },
+        _ => {
+            result.insert(path.to_owned(), value);
+        }
     }
-    result
 }
 
 fn deflatten_value_map(map: Map<String, Value>) -> Map<String, Value> {
