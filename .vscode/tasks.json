@@ -48,6 +48,14 @@
     },
     {
       "type": "shell",
+      "label": "build all",
+      "command": "cargo",
+      "args": ["build", "--all-targets"],
+      "problemMatcher": ["$rustc"],
+      "group": { "kind": "build", "isDefault": false }
+    },
+    {
+      "type": "shell",
       "label": "build mandelbrot",
       "command": "cargo",
       "args": ["build", "--example", "mandelbrot"],

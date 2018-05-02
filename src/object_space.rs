@@ -98,6 +98,24 @@ pub trait ObjectSpace {
     where
         for<'de> T: Serialize + Deserialize<'de> + 'static;
 
+    /// Return a copy of a struct of type T.
+    /// The operation blocks until such a struct is found or until timeout,
+    /// which ever happens fist.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # use object_space::{TreeObjectSpace, ObjectSpace};
+    /// # use std::time::Duration;
+    /// let space = TreeObjectSpace::new();
+    /// let duration = Duration::from_millis(100);
+    /// assert_eq!(space.read_timeout::<String>(duration), None);
+    /// space.write(String::from("Hello World"));
+    /// assert_eq!(
+    ///     space.read_timeout::<String>(duration),
+    ///     Some(String::from("Hello World"))
+    /// );
+    /// ```
     fn read_timeout<T>(&self, time: Duration) -> Option<T>
     where
         for<'de> T: Serialize + Deserialize<'de> + 'static;
@@ -161,6 +179,24 @@ pub trait ObjectSpace {
     where
         for<'de> T: Serialize + Deserialize<'de> + 'static;
 
+    /// Remove and return a struct of type T.
+    /// The operation blocks until such a struct is found or until timeout,
+    /// which ever happens fist.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # use object_space::{TreeObjectSpace, ObjectSpace};
+    /// # use std::time::Duration;
+    /// let space = TreeObjectSpace::new();
+    /// let duration = Duration::from_millis(100);
+    /// assert_eq!(space.take_timeout::<String>(duration), None);
+    /// space.write(String::from("Hello World"));
+    /// assert_eq!(
+    ///     space.take_timeout::<String>(duration),
+    ///     Some(String::from("Hello World"))
+    /// );
+    /// ```
     fn take_timeout<T>(&self, time: Duration) -> Option<T>
     where
         for<'de> T: Serialize + Deserialize<'de> + 'static;
@@ -243,6 +279,24 @@ pub trait RangeLookupObjectSpace<U>: ObjectSpace {
         for<'de> T: Serialize + Deserialize<'de> + 'static,
         R: RangeBounds<U> + Clone;
 
+    /// Given a path to an element of the struct and a range of possible values,
+    /// return a copy of a struct whose specified element is within the range.
+    /// The operation blocks until a struct satisfies the condition is found
+    /// or until timeout, whichever happens first.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # use object_space::{TreeObjectSpace, ObjectSpace, RangeLookupObjectSpace};
+    /// # use std::time::Duration;
+    /// let space = TreeObjectSpace::new();
+    /// let timeout = Duration::from_millis(100);
+    /// space.write::<i64>(3);
+    /// space.write::<i64>(5);
+    ///
+    /// assert_eq!(space.read_by_range_timeout::<i64, _>("", 2..4, timeout), Some(3));
+    /// assert_eq!(space.read_by_range_timeout::<i64, _>("", ..2, timeout), None);
+    /// ```
     fn read_by_range_timeout<T, R>(&self, field: &str, range: R, timeout: Duration) -> Option<T>
     where
         for<'de> T: Serialize + Deserialize<'de> + 'static,
@@ -308,6 +362,24 @@ pub trait RangeLookupObjectSpace<U>: ObjectSpace {
         for<'de> T: Serialize + Deserialize<'de> + 'static,
         R: RangeBounds<U> + Clone;
 
+    /// Given a path to an element of the struct and a range of possible values,
+    /// remove and return a struct whose specified element is within the range.
+    /// The operation blocks until a struct satisfies the condition is found
+    /// or until timeout, whichever happens first.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # use object_space::{TreeObjectSpace, ObjectSpace, RangeLookupObjectSpace};
+    /// # use std::time::Duration;
+    /// let space = TreeObjectSpace::new();
+    /// let timeout = Duration::from_millis(100);
+    /// space.write::<i64>(3);
+    /// space.write::<i64>(5);
+    ///
+    /// assert_eq!(space.take_by_range_timeout::<i64, _>("", 2..4, timeout), Some(3));
+    /// assert_eq!(space.take_by_range_timeout::<i64, _>("", ..2, timeout), None);
+    /// ```
     fn take_by_range_timeout<T, R>(&self, field: &str, range: R, timeout: Duration) -> Option<T>
     where
         for<'de> T: Serialize + Deserialize<'de> + 'static,
@@ -388,6 +460,25 @@ pub trait ValueLookupObjectSpace<U>: ObjectSpace {
     where
         for<'de> T: Serialize + Deserialize<'de> + 'static;
 
+    /// Given a path to an element of the struct and a possible value,
+    /// return a copy of a struct whose specified element of the specified value.
+    ///
+    /// The operation is blocks until an element satisfies the condition is found
+    /// or until timeout, which ever comes first.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # use object_space::{TreeObjectSpace, ObjectSpace, ValueLookupObjectSpace};
+    /// # use std::time::Duration;
+    /// let space = TreeObjectSpace::new();
+    /// let timeout = Duration::from_millis(100);
+    /// space.write::<i64>(3);
+    /// space.write::<i64>(5);
+    ///
+    /// assert_eq!(space.read_by_value_timeout::<i64>("", &3, timeout), Some(3));
+    /// assert_eq!(space.read_by_value_timeout::<i64>("", &2, timeout), None);
+    /// ```
     fn read_by_value_timeout<T>(&self, field: &str, key: &U, timeout: Duration) -> Option<T>
     where
         for<'de> T: Serialize + Deserialize<'de> + 'static;
@@ -432,6 +523,7 @@ pub trait ValueLookupObjectSpace<U>: ObjectSpace {
 
     /// Given a path to an element of the struct and a possible value,
     /// remove and return a struct whose specified element of the specified value.
+    ///
     /// The operation is blocks until an element satisfies the condition is found.
     ///
     /// # Example
@@ -448,6 +540,26 @@ pub trait ValueLookupObjectSpace<U>: ObjectSpace {
     where
         for<'de> T: Serialize + Deserialize<'de> + 'static;
 
+    /// Given a path to an element of the struct and a possible value,
+    /// remove and return a struct whose specified element of the specified value.
+    ///
+    /// The operation is blocks until an element satisfies the condition is found
+    /// or until timeout, which ever comes first.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # use object_space::{TreeObjectSpace, ObjectSpace, ValueLookupObjectSpace};
+    /// # use std::time::Duration;
+    /// let space = TreeObjectSpace::new();
+    /// let timeout = Duration::from_millis(100);
+    /// space.write::<i64>(3);
+    /// space.write::<i64>(5);
+    ///
+    /// assert_eq!(space.take_by_value_timeout::<i64>("", &3, timeout), Some(3));
+    /// assert_eq!(space.take_by_value_timeout::<i64>("", &2, timeout), None);
+    /// assert_eq!(space.take_by_value_timeout::<i64>("", &3, timeout), None);
+    /// ```
     fn take_by_value_timeout<T>(&self, field: &str, key: &U, timeout: Duration) -> Option<T>
     where
         for<'de> T: Serialize + Deserialize<'de> + 'static;
@@ -1032,6 +1144,7 @@ macro_rules! object_key{
 object_range!{i64 String f64}
 object_key!{i64 String bool f64}
 
+#[cfg(test)]
 mod tests {
     use super::*;
 
