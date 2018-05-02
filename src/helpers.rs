@@ -1,60 +1,63 @@
+use std::iter::Peekable;
+
 use serde_json::map::Map;
 use serde_json::value::Value;
 
 pub fn flatten(v: Value) -> Value {
     match v {
-        Value::Object(map) => Value::Object(flatten_value_map(map)),
+        Value::Object(_) => {
+            let mut result = Map::new();
+            flatten_helper("", v, &mut result);
+            Value::Object(result)
+        }
         _ => v,
     }
 }
 
 pub fn deflatten(v: Value) -> Value {
     match v {
-        Value::Object(map) => Value::Object(deflatten_value_map(map)),
+        Value::Object(map) => Value::Object(deflatten_helper(map)),
         _ => v,
     }
 }
 
-fn flatten_value_map(map: Map<String, Value>) -> Map<String, Value> {
+fn flatten_helper(path: &str, value: Value, result: &mut Map<String, Value>) {
+    match value {
+        Value::Object(map) => for (k, v) in map {
+            let new_path = if path.is_empty() {
+                k
+            } else {
+                format!("{}.{}", path, k)
+            };
+            flatten_helper(&new_path, v, result)
+        },
+        _ => {
+            result.insert(path.to_owned(), value);
+        }
+    }
+}
+
+fn deflatten_helper(map: Map<String, Value>) -> Map<String, Value> {
     let mut result = Map::new();
     for (key, value) in map {
-        match value {
-            Value::Object(obj) => for (k, v) in obj {
-                let new_key = format!("{}.{}", key, k);
-                result.insert(new_key, flatten(v));
-            },
-            _ => {
-                result.insert(key, value);
-                ()
-            }
-        };
+        insert_to_map(&mut result, &mut key.split('.').peekable(), value);
     }
     result
 }
 
-fn deflatten_value_map(map: Map<String, Value>) -> Map<String, Value> {
-    let mut temp = Map::new();
-    let mut result = Map::new();
-    for (key, value) in map {
-        let mut iterator = key.splitn(2, '.');
-        if let Some(newkey) = iterator.next() {
-            match iterator.next() {
-                None => {
-                    result.entry(newkey).or_insert(value);
-                    ()
-                }
-                Some(subkey) => {
-                    let submap = temp.entry(newkey).or_insert(Value::Object(Map::new()));
-                    if let Some(submap) = submap.as_object_mut() {
-                        submap.entry(subkey).or_insert(value);
-                    }
-                }
+fn insert_to_map<'a, I>(map: &mut Map<String, Value>, iter: &mut Peekable<I>, value: Value)
+where
+    I: Iterator<Item = &'a str>,
+{
+    if let Some(field_val) = iter.next() {
+        match iter.peek() {
+            Some(_) => {
+                let child = map.entry(field_val).or_insert(Value::Object(Map::new()));
+                insert_to_map(child.as_object_mut().expect("invalid JSON"), iter, value);
+            }
+            None => {
+                map.insert(field_val.to_owned(), value);
             }
         }
     }
-
-    for (key, value) in temp {
-        result.insert(key, deflatten(value));
-    }
-    result
 }
