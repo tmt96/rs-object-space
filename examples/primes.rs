@@ -7,7 +7,7 @@ use std::env;
 use std::sync::Arc;
 use std::thread;
 
-use object_space::{ObjectSpace, ObjectSpaceKey, ObjectSpaceRange, TreeObjectSpace};
+use object_space::{ObjectSpace, RangeLookupObjectSpace, TreeObjectSpace, ValueLookupObjectSpace};
 
 fn main() {
     let mut args = env::args();
@@ -61,7 +61,7 @@ fn run(upper_lim: i64, thread_count: i64) {
         // "joining" threads
         for _ in 0..thread_count {
             let clone = space.clone();
-            clone.take_key::<Task>("finished", &true);
+            clone.take_by_value::<Task>("finished", &true);
         }
         n = max;
     }
@@ -73,11 +73,13 @@ fn run(upper_lim: i64, thread_count: i64) {
 
 fn check_numbers(space: Arc<TreeObjectSpace>) {
     loop {
-        let task = space.take_key::<Task>("finished", &false);
+        let task = space.take_by_value::<Task>("finished", &false);
         let max = task.end;
         let min = task.start;
         let upper_limit = (max as f64).sqrt() as i64 + 1;
-        let primes: Vec<i64> = space.read_all_range::<i64, _>("", ..upper_limit).collect();
+        let primes: Vec<i64> = space
+            .read_all_by_range::<i64, _>("", ..upper_limit)
+            .collect();
         for i in min..max {
             if primes.iter().all(|prime| i % prime != 0) {
                 space.write(i);
