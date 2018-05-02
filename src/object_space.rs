@@ -243,6 +243,11 @@ pub trait RangeLookupObjectSpace<U>: ObjectSpace {
         for<'de> T: Serialize + Deserialize<'de> + 'static,
         R: RangeBounds<U> + Clone;
 
+    fn read_by_range_timeout<T, R>(&self, field: &str, range: R, timeout: Duration) -> Option<T>
+    where
+        for<'de> T: Serialize + Deserialize<'de> + 'static,
+        R: RangeBounds<U> + Clone;
+
     /// Given a path to an element of the struct and a range of possible values,
     /// remove and return a struct whose specified element is within the range.
     /// The operation is non-blocking and will returns None if no struct satisfies condition.
@@ -299,6 +304,11 @@ pub trait RangeLookupObjectSpace<U>: ObjectSpace {
     /// assert_eq!(space.take_by_range::<i64, _>("", 2..), 5);
     /// ```
     fn take_by_range<T, R>(&self, field: &str, range: R) -> T
+    where
+        for<'de> T: Serialize + Deserialize<'de> + 'static,
+        R: RangeBounds<U> + Clone;
+
+    fn take_by_range_timeout<T, R>(&self, field: &str, range: R, timeout: Duration) -> Option<T>
     where
         for<'de> T: Serialize + Deserialize<'de> + 'static,
         R: RangeBounds<U> + Clone;
@@ -378,6 +388,10 @@ pub trait ValueLookupObjectSpace<U>: ObjectSpace {
     where
         for<'de> T: Serialize + Deserialize<'de> + 'static;
 
+    fn read_by_value_timeout<T>(&self, field: &str, key: &U, timeout: Duration) -> Option<T>
+    where
+        for<'de> T: Serialize + Deserialize<'de> + 'static;
+
     /// Given a path to an element of the struct and a possible value,
     /// remove and return a struct whose specified element of the specified value.
     /// The operation is non-blocking and will returns None if no struct satisfies condition.
@@ -431,6 +445,10 @@ pub trait ValueLookupObjectSpace<U>: ObjectSpace {
     /// assert_eq!(space.take_by_value::<i64>("", &3), 3);
     /// ```
     fn take_by_value<T>(&self, field: &str, key: &U) -> T
+    where
+        for<'de> T: Serialize + Deserialize<'de> + 'static;
+
+    fn take_by_value_timeout<T>(&self, field: &str, key: &U, timeout: Duration) -> Option<T>
     where
         for<'de> T: Serialize + Deserialize<'de> + 'static;
 }
@@ -565,7 +583,7 @@ impl ObjectSpace for TreeObjectSpace {
         from_value(deflatten(value)).unwrap()
     }
 
-    fn read_timeout<T>(&self, time: Duration) -> Option<T>
+    fn read_timeout<T>(&self, timeout: Duration) -> Option<T>
     where
         for<'de> T: Serialize + Deserialize<'de> + 'static,
     {
@@ -575,7 +593,7 @@ impl ObjectSpace for TreeObjectSpace {
         {
             let mut fetched = lock.lock().unwrap();
             let start_time = Instant::now();
-            while Instant::now() - start_time < time {
+            while Instant::now() - start_time < timeout {
                 let result = match self.get_object_entry_ref::<T>() {
                     Some(entry) => entry.get(),
                     _ => None,
@@ -584,7 +602,7 @@ impl ObjectSpace for TreeObjectSpace {
                     value = result;
                     break;
                 }
-                fetched = cvar.wait_timeout(fetched, time).unwrap().0;
+                fetched = cvar.wait_timeout(fetched, timeout).unwrap().0;
             }
         }
         value.and_then(|val| from_value(deflatten(val)).ok())
@@ -644,7 +662,7 @@ impl ObjectSpace for TreeObjectSpace {
         from_value(deflatten(value)).unwrap()
     }
 
-    fn take_timeout<T>(&self, time: Duration) -> Option<T>
+    fn take_timeout<T>(&self, timeout: Duration) -> Option<T>
     where
         for<'de> T: Serialize + Deserialize<'de> + 'static,
     {
@@ -654,7 +672,7 @@ impl ObjectSpace for TreeObjectSpace {
         {
             let mut fetched = lock.lock().unwrap();
             let start_time = Instant::now();
-            while Instant::now() - start_time < time {
+            while Instant::now() - start_time < timeout {
                 let result = match self.get_object_entry_mut::<T>() {
                     Some(mut entry) => entry.remove(),
                     _ => None,
@@ -663,7 +681,7 @@ impl ObjectSpace for TreeObjectSpace {
                     value = result;
                     break;
                 }
-                fetched = cvar.wait_timeout(fetched, time).unwrap().0;
+                fetched = cvar.wait_timeout(fetched, timeout).unwrap().0;
             }
         }
         value.and_then(|val| from_value(deflatten(val)).ok())
@@ -727,6 +745,32 @@ macro_rules! object_range{
                     from_value(deflatten(value)).unwrap()
                 }
 
+                fn read_by_range_timeout<T, R>(&self, field: &str, range: R, timeout: Duration) -> Option<T>
+                where
+                    for<'de> T: Serialize + Deserialize<'de> + 'static,
+                    R: RangeBounds<$ty> + Clone,
+                {
+                    self.add_entry(TypeId::of::<T>());
+                    let &(ref lock, ref cvar) = &*self.get_lock::<T>().unwrap().clone();
+                    let mut value = None;
+                    {
+                        let mut fetched = lock.lock().unwrap();
+                        let start_time = Instant::now();
+                        while Instant::now() - start_time < timeout {
+                            let result = match self.get_object_entry_ref::<T>() {
+                                Some(entry) => entry.get_by_range::<_>(field, range.clone()),
+                                _ => None,
+                            };
+                            if result.is_some() {
+                                value = result;
+                                break;
+                            }
+                            fetched = cvar.wait_timeout(fetched, timeout).unwrap().0;
+                        }
+                    }
+                    value.and_then(|val| from_value(deflatten(val)).unwrap())
+                }
+
                 fn try_take_by_range<T, R>(&self, field: &str, range: R) -> Option<T>
                 where
                     for<'de> T: Serialize + Deserialize<'de> + 'static,
@@ -787,6 +831,32 @@ macro_rules! object_range{
                     }
                     from_value(deflatten(value)).unwrap()
                 }
+
+                fn take_by_range_timeout<T, R>(&self, field: &str, range: R, timeout: Duration) -> Option<T>
+                where
+                    for<'de> T: Serialize + Deserialize<'de> + 'static,
+                    R: RangeBounds<$ty> + Clone,
+                {
+                    self.add_entry(TypeId::of::<T>());
+                    let &(ref lock, ref cvar) = &*self.get_lock::<T>().unwrap().clone();
+                    let mut value = None;
+                    {
+                        let mut fetched = lock.lock().unwrap();
+                        let start_time = Instant::now();
+                        while Instant::now() - start_time < timeout {
+                            let result = match self.get_object_entry_mut::<T>() {
+                                Some(mut entry) => entry.remove_by_range::<_>(field, range.clone()),
+                                _ => None,
+                            };
+                            if result.is_some() {
+                                value = result;
+                                break;
+                            }
+                            fetched = cvar.wait_timeout(fetched, timeout).unwrap().0;
+                        }
+                    }
+                    value.and_then(|val| from_value(deflatten(val)).unwrap())
+                }
             }
         )*
     };
@@ -846,6 +916,32 @@ macro_rules! object_key{
                     from_value(deflatten(value)).unwrap()
                 }
 
+                fn read_by_value_timeout<T>(&self, field: &str, key: &$ty, timeout: Duration) -> Option<T>
+                where
+                    for<'de> T: Serialize + Deserialize<'de> + 'static,
+                {
+                    self.add_entry(TypeId::of::<T>());
+                    let &(ref lock, ref cvar) = &*self.get_lock::<T>().unwrap().clone();
+                    let mut value = None;
+                    {
+                        let mut fetched = lock.lock().unwrap();
+                        let start_time = Instant::now();
+                        while Instant::now() - start_time < timeout {
+                            let result = match self.get_object_entry_ref::<T>() {
+                                Some(entry) => entry.get_by_value(field, key),
+                                _ => None,
+                            };
+                            if result.is_some() {
+                                value = result;
+                                break;
+                            }
+                            fetched = cvar.wait_timeout(fetched, timeout).unwrap().0;
+                        }
+                    }
+                    value.and_then(|val| from_value(deflatten(val)).unwrap())
+                }
+
+
                 fn try_take_by_value<T>(&self, field: &str, key: &$ty) -> Option<T>
                 where
                     for<'de> T: Serialize + Deserialize<'de> + 'static,
@@ -902,6 +998,31 @@ macro_rules! object_key{
                         }
                     }
                     from_value(deflatten(value)).unwrap()
+                }
+
+                fn take_by_value_timeout<T>(&self, field: &str, key: &$ty, timeout: Duration) -> Option<T>
+                where
+                    for<'de> T: Serialize + Deserialize<'de> + 'static,
+                {
+                    self.add_entry(TypeId::of::<T>());
+                    let &(ref lock, ref cvar) = &*self.get_lock::<T>().unwrap().clone();
+                    let mut value = None;
+                    {
+                        let mut fetched = lock.lock().unwrap();
+                        let start_time = Instant::now();
+                        while Instant::now() - start_time < timeout {
+                            let result = match self.get_object_entry_mut::<T>() {
+                                Some(mut entry) => entry.remove_by_value(field, key),
+                                _ => None,
+                            };
+                            if result.is_some() {
+                                value = result;
+                                break;
+                            }
+                            fetched = cvar.wait_timeout(fetched, timeout).unwrap().0;
+                        }
+                    }
+                    value.and_then(|val| from_value(deflatten(val)).unwrap())
                 }
             }
         )*
