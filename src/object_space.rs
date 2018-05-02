@@ -1,6 +1,7 @@
 use std::any::TypeId;
 use std::ops::RangeBounds;
 use std::sync::{Arc, Condvar, Mutex};
+use std::time::{Duration, Instant};
 
 use chashmap::{CHashMap, ReadGuard, WriteGuard};
 use serde::{Deserialize, Serialize};
@@ -97,6 +98,10 @@ pub trait ObjectSpace {
     where
         for<'de> T: Serialize + Deserialize<'de> + 'static;
 
+    fn read_timeout<T>(&self, time: Duration) -> Option<T>
+    where
+        for<'de> T: Serialize + Deserialize<'de> + 'static;
+
     /// Remove and return a struct of type T.
     /// The operation is non-blocking and will returns None if no struct satisfies condition.
     ///
@@ -153,6 +158,10 @@ pub trait ObjectSpace {
     /// assert_eq!(space.try_take::<String>(), None);
     /// ```
     fn take<T>(&self) -> T
+    where
+        for<'de> T: Serialize + Deserialize<'de> + 'static;
+
+    fn take_timeout<T>(&self, time: Duration) -> Option<T>
     where
         for<'de> T: Serialize + Deserialize<'de> + 'static;
 }
@@ -513,10 +522,7 @@ impl ObjectSpace for TreeObjectSpace {
             Some(entry) => entry.get(),
             _ => None,
         };
-        match value {
-            Some(val) => from_value(deflatten(val)).ok(),
-            _ => None,
-        }
+        value.and_then(|val| from_value(deflatten(val)).ok())
     }
 
     fn read_all<'a, T>(&'a self) -> Box<Iterator<Item = T> + 'a>
@@ -557,6 +563,31 @@ impl ObjectSpace for TreeObjectSpace {
             }
         }
         from_value(deflatten(value)).unwrap()
+    }
+
+    fn read_timeout<T>(&self, time: Duration) -> Option<T>
+    where
+        for<'de> T: Serialize + Deserialize<'de> + 'static,
+    {
+        self.add_entry(TypeId::of::<T>());
+        let &(ref lock, ref cvar) = &*self.get_lock::<T>().unwrap().clone();
+        let mut value = None;
+        {
+            let mut fetched = lock.lock().unwrap();
+            let start_time = Instant::now();
+            while Instant::now() - start_time < time {
+                let result = match self.get_object_entry_ref::<T>() {
+                    Some(entry) => entry.get(),
+                    _ => None,
+                };
+                if result.is_some() {
+                    value = result;
+                    break;
+                }
+                fetched = cvar.wait_timeout(fetched, time).unwrap().0;
+            }
+        }
+        value.and_then(|val| from_value(deflatten(val)).ok())
     }
 
     fn try_take<T>(&self) -> Option<T>
@@ -611,6 +642,31 @@ impl ObjectSpace for TreeObjectSpace {
             }
         }
         from_value(deflatten(value)).unwrap()
+    }
+
+    fn take_timeout<T>(&self, time: Duration) -> Option<T>
+    where
+        for<'de> T: Serialize + Deserialize<'de> + 'static,
+    {
+        self.add_entry(TypeId::of::<T>());
+        let &(ref lock, ref cvar) = &*self.get_lock::<T>().unwrap().clone();
+        let mut value = None;
+        {
+            let mut fetched = lock.lock().unwrap();
+            let start_time = Instant::now();
+            while Instant::now() - start_time < time {
+                let result = match self.get_object_entry_mut::<T>() {
+                    Some(mut entry) => entry.remove(),
+                    _ => None,
+                };
+                if result.is_some() {
+                    value = result;
+                    break;
+                }
+                fetched = cvar.wait_timeout(fetched, time).unwrap().0;
+            }
+        }
+        value.and_then(|val| from_value(deflatten(val)).ok())
     }
 }
 
