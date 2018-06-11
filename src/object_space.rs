@@ -172,8 +172,8 @@ pub trait ObjectSpace {
 /// space.write::<i64>(3);
 /// space.write::<i64>(5);
 ///
-/// assert_eq!(space.try_read_by_range::<i64, _>("", 2..4), Some(3));
-/// assert_eq!(space.try_read_by_range::<i64, _>("", ..2), None);
+/// assert_eq!(space.try_read_by_range::<i64>("", 2..4), Some(3));
+/// assert_eq!(space.try_read_by_range::<i64>("", ..2), None);
 /// ```
 pub trait RangeLookupObjectSpace<U>: ObjectSpace {
     /// Given a path to an element of the struct and a range of possible values,
@@ -188,13 +188,12 @@ pub trait RangeLookupObjectSpace<U>: ObjectSpace {
     /// space.write::<i64>(3);
     /// space.write::<i64>(5);
     ///
-    /// assert_eq!(space.try_read_by_range::<i64, _>("", 2..4), Some(3));
-    /// assert_eq!(space.try_read_by_range::<i64, _>("", ..2), None);
+    /// assert_eq!(space.try_read_by_range::<i64>("", 2..4), Some(3));
+    /// assert_eq!(space.try_read_by_range::<i64>("", ..2), None);
     /// ```
-    fn try_read_by_range<T, R>(&self, field: &str, range: R) -> Option<T>
+    fn try_read_by_range<T>(&self, field: &str, range: impl RangeBounds<U> + Clone) -> Option<T>
     where
-        for<'de> T: Serialize + Deserialize<'de> + 'static,
-        R: RangeBounds<U> + Clone;
+        for<'de> T: Serialize + Deserialize<'de> + 'static;
 
     /// Given a path to an element of the struct and a range of possible values,
     /// return copies of all structs whose specified element is within the range.
@@ -207,13 +206,16 @@ pub trait RangeLookupObjectSpace<U>: ObjectSpace {
     /// space.write::<i64>(3);
     /// space.write::<i64>(5);
     ///
-    /// assert_eq!(space.read_all_by_range::<i64, _>("", 2..4).count(), 1);
-    /// assert_eq!(space.read_all_by_range::<i64, _>("", 2..).count(), 2);
+    /// assert_eq!(space.read_all_by_range::<i64>("", 2..4).count(), 1);
+    /// assert_eq!(space.read_all_by_range::<i64>("", 2..).count(), 2);
     /// ```
-    fn read_all_by_range<'a, T, R>(&'a self, field: &str, range: R) -> Box<Iterator<Item = T> + 'a>
+    fn read_all_by_range<'a, T>(
+        &'a self,
+        field: &str,
+        range: impl RangeBounds<U> + Clone,
+    ) -> Box<Iterator<Item = T> + 'a>
     where
-        for<'de> T: Deserialize<'de> + 'static,
-        R: RangeBounds<U> + Clone;
+        for<'de> T: Deserialize<'de> + 'static;
 
     /// Given a path to an element of the struct and a range of possible values,
     /// return a copy of a struct whose specified element is within the range.
@@ -227,12 +229,11 @@ pub trait RangeLookupObjectSpace<U>: ObjectSpace {
     /// space.write::<i64>(3);
     /// space.write::<i64>(5);
     ///
-    /// assert_eq!(space.read_by_range::<i64, _>("", 2..4), 3);
+    /// assert_eq!(space.read_by_range::<i64>("", 2..4), 3);
     /// ```
-    fn read_by_range<T, R>(&self, field: &str, range: R) -> T
+    fn read_by_range<T>(&self, field: &str, range: impl RangeBounds<U> + Clone) -> T
     where
-        for<'de> T: Serialize + Deserialize<'de> + 'static,
-        R: RangeBounds<U> + Clone;
+        for<'de> T: Serialize + Deserialize<'de> + 'static;
 
     /// Given a path to an element of the struct and a range of possible values,
     /// remove and return a struct whose specified element is within the range.
@@ -246,14 +247,13 @@ pub trait RangeLookupObjectSpace<U>: ObjectSpace {
     /// space.write::<i64>(3);
     /// space.write::<i64>(5);
     ///
-    /// assert_eq!(space.try_take_by_range::<i64, _>("", 2..4), Some(3));
-    /// assert_eq!(space.try_take_by_range::<i64, _>("", 2..4), None);
-    /// assert_eq!(space.try_take_by_range::<i64, _>("", 2..), Some(5));
+    /// assert_eq!(space.try_take_by_range::<i64>("", 2..4), Some(3));
+    /// assert_eq!(space.try_take_by_range::<i64>("", 2..4), None);
+    /// assert_eq!(space.try_take_by_range::<i64>("", 2..), Some(5));
     /// ```
-    fn try_take_by_range<T, R>(&self, field: &str, range: R) -> Option<T>
+    fn try_take_by_range<T>(&self, field: &str, range: impl RangeBounds<U> + Clone) -> Option<T>
     where
-        for<'de> T: Serialize + Deserialize<'de> + 'static,
-        R: RangeBounds<U> + Clone;
+        for<'de> T: Serialize + Deserialize<'de> + 'static;
 
     /// Given a path to an element of the struct and a range of possible values,
     /// remove and return all structs whose specified element is within the range.
@@ -266,13 +266,16 @@ pub trait RangeLookupObjectSpace<U>: ObjectSpace {
     /// space.write::<i64>(3);
     /// space.write::<i64>(5);
     ///
-    /// assert_eq!(space.take_all_by_range::<i64, _>("", 2..4).count(), 1);
-    /// assert_eq!(space.take_all_by_range::<i64, _>("", 2..).count(), 1);
+    /// assert_eq!(space.take_all_by_range::<i64>("", 2..4).count(), 1);
+    /// assert_eq!(space.take_all_by_range::<i64>("", 2..).count(), 1);
     /// ```
-    fn take_all_by_range<'a, T, R>(&'a self, field: &str, range: R) -> Box<Iterator<Item = T> + 'a>
+    fn take_all_by_range<'a, T>(
+        &'a self,
+        field: &str,
+        range: impl RangeBounds<U> + Clone,
+    ) -> Box<Iterator<Item = T> + 'a>
     where
-        for<'de> T: Deserialize<'de> + 'static,
-        R: RangeBounds<U> + Clone;
+        for<'de> T: Deserialize<'de> + 'static;
 
     /// Given a path to an element of the struct and a range of possible values,
     /// remove and return a struct whose specified element is within the range.
@@ -286,13 +289,12 @@ pub trait RangeLookupObjectSpace<U>: ObjectSpace {
     /// space.write::<i64>(3);
     /// space.write::<i64>(5);
     ///
-    /// assert_eq!(space.take_by_range::<i64, _>("", 2..4), 3);
-    /// assert_eq!(space.take_by_range::<i64, _>("", 2..), 5);
+    /// assert_eq!(space.take_by_range::<i64>("", 2..4), 3);
+    /// assert_eq!(space.take_by_range::<i64>("", 2..), 5);
     /// ```
-    fn take_by_range<T, R>(&self, field: &str, range: R) -> T
+    fn take_by_range<T>(&self, field: &str, range: impl RangeBounds<U> + Clone) -> T
     where
-        for<'de> T: Serialize + Deserialize<'de> + 'static,
-        R: RangeBounds<U> + Clone;
+        for<'de> T: Serialize + Deserialize<'de> + 'static;
 }
 
 /// An extension of `ObjectSpace` supporting retrieving structs by value of a field.
@@ -523,7 +525,7 @@ impl ObjectSpace for TreeObjectSpace {
     where
         for<'de> T: Serialize + Deserialize<'de> + 'static,
     {
-        let val_iter: Vec<_> = match self.get_object_entry_ref::<T>() {
+        let val_iter = match self.get_object_entry_ref::<T>() {
             Some(ent) => ent.get_all().collect(),
             None => Vec::new(),
         };
@@ -618,13 +620,12 @@ macro_rules! object_range{
     ($($ty:ident)*) => {
         $(
             impl RangeLookupObjectSpace<$ty> for TreeObjectSpace {
-                fn try_read_by_range<T, R>(&self, field: &str, range: R) -> Option<T>
+                fn try_read_by_range<T>(&self, field: &str, range: impl RangeBounds<$ty> + Clone) -> Option<T>
                 where
                     for<'de> T: Serialize + Deserialize<'de> + 'static,
-                    R: RangeBounds<$ty> + Clone,
                 {
                     let value = match self.get_object_entry_ref::<T>() {
-                        Some(entry) => entry.get_by_range::<_>(field, range),
+                        Some(entry) => entry.get_by_range(field, range),
                         _ => None,
                     };
                     match value {
@@ -633,23 +634,21 @@ macro_rules! object_range{
                     }
                 }
 
-                fn read_all_by_range<'a, T, R>(&'a self, field: &str, range: R) -> Box<Iterator<Item = T> + 'a>
+                fn read_all_by_range<'a, T>(&'a self, field: &str, range: impl RangeBounds<$ty> + Clone) -> Box<Iterator<Item = T> + 'a>
                 where
                     for<'de> T: Deserialize<'de> + 'static,
-                    R: RangeBounds<$ty> + Clone,
                 {
                     let val_iter: Vec<_> = match self.get_object_entry_ref::<T>() {
-                        Some(ent) => ent.get_all_by_range::<_>(field, range).collect(),
+                        Some(ent) => ent.get_all_by_range(field, range).collect(),
                         None => Vec::new(),
                     };
 
                     Box::new(val_iter.into_iter().filter_map(|item| from_value(deflatten(item)).ok()))
                 }
 
-                fn read_by_range<T, R>(&self, field: &str, range: R) -> T
+                fn read_by_range<T>(&self, field: &str, range: impl RangeBounds<$ty> + Clone) -> T
                 where
                     for<'de> T: Serialize + Deserialize<'de> + 'static,
-                    R: RangeBounds<$ty> + Clone,
                 {
                     self.add_entry(TypeId::of::<T>());
                     let &(ref lock, ref cvar) = &*self.get_lock::<T>().unwrap().clone();
@@ -658,7 +657,7 @@ macro_rules! object_range{
                         let mut fetched = lock.lock().unwrap();
                         loop {
                             let result = match self.get_object_entry_ref::<T>() {
-                                Some(entry) => entry.get_by_range::<_>(field, range.clone()),
+                                Some(entry) => entry.get_by_range(field, range.clone()),
                                 _ => None,
                             };
                             if let Some(item) = result {
@@ -671,13 +670,12 @@ macro_rules! object_range{
                     from_value(deflatten(value)).unwrap()
                 }
 
-                fn try_take_by_range<T, R>(&self, field: &str, range: R) -> Option<T>
+                fn try_take_by_range<T>(&self, field: &str, range: impl RangeBounds<$ty> + Clone) -> Option<T>
                 where
                     for<'de> T: Serialize + Deserialize<'de> + 'static,
-                    R: RangeBounds<$ty> + Clone,
                 {
                     let value = match self.get_object_entry_mut::<T>() {
-                        Some(mut entry) => entry.remove_by_range::<_>(field, range),
+                        Some(mut entry) => entry.remove_by_range(field, range),
                         _ => None,
                     };
                     match value {
@@ -686,17 +684,16 @@ macro_rules! object_range{
                     }
                 }
 
-                fn take_all_by_range<'a, T, R>(
+                fn take_all_by_range<'a, T>(
                     &'a self,
                     field: &str,
-                    range: R,
+                    range: impl RangeBounds<$ty> + Clone,
                 ) -> Box<Iterator<Item = T> + 'a>
                 where
                     for<'de> T: Deserialize<'de> + 'static,
-                    R: RangeBounds<$ty> + Clone,
                 {
                     let val_iter = match self.get_object_entry_mut::<T>() {
-                        Some(mut ent) => ent.remove_all_by_range::<_>(field, range),
+                        Some(mut ent) => ent.remove_all_by_range(field, range),
                         None => Vec::new(),
                     };
 
@@ -707,10 +704,9 @@ macro_rules! object_range{
                     )
                 }
 
-                fn take_by_range<T, R>(&self, field: &str, range: R) -> T
+                fn take_by_range<T>(&self, field: &str, range: impl RangeBounds<$ty> + Clone) -> T
                 where
                     for<'de> T: Serialize + Deserialize<'de> + 'static,
-                    R: RangeBounds<$ty> + Clone,
                 {
                     self.add_entry(TypeId::of::<T>());
                     let &(ref lock, ref cvar) = &*self.get_lock::<T>().unwrap().clone();
@@ -719,7 +715,7 @@ macro_rules! object_range{
                         let mut fetched = lock.lock().unwrap();
                         loop {
                             let result = match self.get_object_entry_mut::<T>() {
-                                Some(mut entry) => entry.remove_by_range::<_>(field, range.clone()),
+                                Some(mut entry) => entry.remove_by_range(field, range.clone()),
                                 _ => None,
                             };
                             if let Some(item) = result {
@@ -1016,12 +1012,12 @@ mod tests {
     #[test]
     fn try_read_by_range() {
         let space = TreeObjectSpace::new();
-        assert_eq!(space.try_read_by_range::<i64, _>("", 2..4), None);
+        assert_eq!(space.try_read_by_range::<i64>("", 2..4), None);
         space.write::<i64>(3);
         space.write::<i64>(5);
 
-        assert_eq!(space.try_read_by_range::<i64, _>("", 2..4), Some(3));
-        assert_ne!(space.try_read_by_range::<i64, _>("", 2..4), None);
+        assert_eq!(space.try_read_by_range::<i64>("", 2..4), Some(3));
+        assert_ne!(space.try_read_by_range::<i64>("", 2..4), None);
 
         space.write(TestStruct {
             count: 3,
@@ -1033,7 +1029,7 @@ mod tests {
         });
 
         assert_eq!(
-            space.try_read_by_range::<TestStruct, _>("count", 2..4),
+            space.try_read_by_range::<TestStruct>("count", 2..4),
             Some(TestStruct {
                 count: 3,
                 name: String::from("Tuan"),
@@ -1041,7 +1037,7 @@ mod tests {
         );
         assert!(
             space
-                .try_read_by_range::<TestStruct, _>("count", 2..4)
+                .try_read_by_range::<TestStruct>("count", 2..4)
                 .is_some()
         );
 
@@ -1061,7 +1057,7 @@ mod tests {
         });
 
         assert_eq!(
-            space.try_read_by_range::<CompoundStruct, _>("person.count", 2..4),
+            space.try_read_by_range::<CompoundStruct>("person.count", 2..4),
             Some(CompoundStruct {
                 person: TestStruct {
                     count: 3,
@@ -1072,7 +1068,7 @@ mod tests {
         );
         assert!(
             space
-                .try_read_by_range::<CompoundStruct, _>("person.count", 2..4)
+                .try_read_by_range::<CompoundStruct>("person.count", 2..4)
                 .is_some()
         );
     }
@@ -1080,11 +1076,11 @@ mod tests {
     #[test]
     fn try_take_by_range() {
         let space = TreeObjectSpace::new();
-        assert_eq!(space.try_take_by_range::<i64, _>("", 2..4), None);
+        assert_eq!(space.try_take_by_range::<i64>("", 2..4), None);
         space.write::<i64>(3);
         space.write::<i64>(5);
-        assert_eq!(space.try_take_by_range::<i64, _>("", 2..4), Some(3));
-        assert_eq!(space.try_take_by_range::<i64, _>("", 2..4), None);
+        assert_eq!(space.try_take_by_range::<i64>("", 2..4), Some(3));
+        assert_eq!(space.try_take_by_range::<i64>("", 2..4), None);
 
         space.write(TestStruct {
             count: 3,
@@ -1096,7 +1092,7 @@ mod tests {
         });
 
         assert_eq!(
-            space.try_take_by_range::<TestStruct, _>("count", 2..4),
+            space.try_take_by_range::<TestStruct>("count", 2..4),
             Some(TestStruct {
                 count: 3,
                 name: String::from("Tuan"),
@@ -1104,7 +1100,7 @@ mod tests {
         );
         assert!(
             space
-                .try_take_by_range::<TestStruct, _>("count", 2..4)
+                .try_take_by_range::<TestStruct>("count", 2..4)
                 .is_none()
         );
 
@@ -1124,7 +1120,7 @@ mod tests {
         });
 
         assert_eq!(
-            space.try_take_by_range::<CompoundStruct, _>("gpa", 3.0..3.5),
+            space.try_take_by_range::<CompoundStruct>("gpa", 3.0..3.5),
             Some(CompoundStruct {
                 person: TestStruct {
                     count: 3,
@@ -1135,7 +1131,7 @@ mod tests {
         );
         assert!(
             space
-                .try_take_by_range::<CompoundStruct, _>("person.count", 2..4)
+                .try_take_by_range::<CompoundStruct>("person.count", 2..4)
                 .is_none()
         );
     }
@@ -1145,8 +1141,8 @@ mod tests {
         let space = TreeObjectSpace::new();
         space.write::<i64>(3);
         space.write::<i64>(5);
-        assert_eq!(space.read_all_by_range::<i64, _>("", 2..4).count(), 1);
-        assert_eq!(space.read_all_by_range::<i64, _>("", 2..4).count(), 1);
+        assert_eq!(space.read_all_by_range::<i64>("", 2..4).count(), 1);
+        assert_eq!(space.read_all_by_range::<i64>("", 2..4).count(), 1);
 
         space.write(TestStruct {
             count: 3,
@@ -1163,15 +1159,11 @@ mod tests {
         });
 
         assert_eq!(
-            space
-                .read_all_by_range::<TestStruct, _>("count", 2..4)
-                .count(),
+            space.read_all_by_range::<TestStruct>("count", 2..4).count(),
             2
         );
         assert_eq!(
-            space
-                .read_all_by_range::<TestStruct, _>("count", 2..4)
-                .count(),
+            space.read_all_by_range::<TestStruct>("count", 2..4).count(),
             2
         );
 
@@ -1199,13 +1191,13 @@ mod tests {
 
         assert_eq!(
             space
-                .read_all_by_range::<CompoundStruct, _>("gpa", 2.5..4.0)
+                .read_all_by_range::<CompoundStruct>("gpa", 2.5..4.0)
                 .count(),
             2
         );
         assert_eq!(
             space
-                .read_all_by_range::<CompoundStruct, _>("person.count", 2..4)
+                .read_all_by_range::<CompoundStruct>("person.count", 2..4)
                 .count(),
             2
         );
@@ -1216,8 +1208,8 @@ mod tests {
         let space = TreeObjectSpace::new();
         space.write::<i64>(3);
         space.write::<i64>(5);
-        assert_eq!(space.take_all_by_range::<i64, _>("", 2..4).count(), 1);
-        assert_eq!(space.take_all_by_range::<i64, _>("", 2..4).count(), 0);
+        assert_eq!(space.take_all_by_range::<i64>("", 2..4).count(), 1);
+        assert_eq!(space.take_all_by_range::<i64>("", 2..4).count(), 0);
 
         space.write(TestStruct {
             count: 3,
@@ -1234,21 +1226,15 @@ mod tests {
         });
 
         assert_eq!(
-            space
-                .take_all_by_range::<TestStruct, _>("count", 2..4)
-                .count(),
+            space.take_all_by_range::<TestStruct>("count", 2..4).count(),
             2
         );
         assert_eq!(
-            space
-                .take_all_by_range::<TestStruct, _>("count", 2..4)
-                .count(),
+            space.take_all_by_range::<TestStruct>("count", 2..4).count(),
             0
         );
         assert_eq!(
-            space
-                .take_all_by_range::<TestStruct, _>("count", 4..)
-                .count(),
+            space.take_all_by_range::<TestStruct>("count", 4..).count(),
             1
         );
 
@@ -1276,19 +1262,19 @@ mod tests {
 
         assert_eq!(
             space
-                .take_all_by_range::<CompoundStruct, _>("gpa", 2.5..3.5)
+                .take_all_by_range::<CompoundStruct>("gpa", 2.5..3.5)
                 .count(),
             2
         );
         assert_eq!(
             space
-                .take_all_by_range::<CompoundStruct, _>("person.count", 2..4)
+                .take_all_by_range::<CompoundStruct>("person.count", 2..4)
                 .count(),
             0
         );
         assert_eq!(
             space
-                .take_all_by_range::<CompoundStruct, _>("gpa", 3.5..)
+                .take_all_by_range::<CompoundStruct>("gpa", 3.5..)
                 .count(),
             1
         );
@@ -1567,7 +1553,7 @@ mod tests {
             None
         );
         assert_eq!(
-            space.try_read_by_range::<TestEnum, _>("Struct.count", 3..5),
+            space.try_read_by_range::<TestEnum>("Struct.count", 3..5),
             None
         );
 
@@ -1583,7 +1569,7 @@ mod tests {
             }
         );
         assert_eq!(
-            space.take_by_range::<TestEnum, _>("Struct.count", 3..5),
+            space.take_by_range::<TestEnum>("Struct.count", 3..5),
             TestEnum::Struct {
                 count: 4,
                 name: String::from("Tuan")
