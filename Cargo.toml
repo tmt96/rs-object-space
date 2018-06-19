@@ -1,5 +1,5 @@
 [package]
-name = "object_space"
+name = "object-space"
 version = "0.1.0"
 authors = ["tmt <mt12@williams.edu>"]
 license = "Apache-2.0/MIT"
