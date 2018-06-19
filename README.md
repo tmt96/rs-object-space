@@ -1,8 +1,10 @@
-# rObjectSpace
+# rs-object-space
 
-An object store library for highly concurrent program written in Rust.
+This crate is an implementation of ObjectSpace - a natural progression on the idea of [TupleSpace](https://en.wikipedia.org/wiki/Tuple_space) proposed by Gelernter in 1985. ObjectSpace is a data structure with the capability of holding any structure (e.g: a string, an int, and a complex struct could all lives under one ObjectSpace). It also allows retrieving a struct based on the value of a field.
 
-To get documentation, run `cargo doc --open --no-deps`.
+This crate also provides a fully thread-safe implementation of ObjectSpace, which allows simple concurrent and distributed programming.
+
+The crate requires Rust nightly for build and usage.
 
 ## Building
 
