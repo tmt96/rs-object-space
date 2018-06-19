@@ -9,6 +9,9 @@ This crate is an implementation of ObjectSpace - a natural progression on the id
 
 This crate also provides a fully thread-safe implementation of ObjectSpace, which allows simple concurrent and distributed programming.
 """
+exclude = [
+    "paper/*.pdf"
+]
 
 
 [dependencies]
