@@ -12,7 +12,8 @@ This crate also provides a fully thread-safe implementation of ObjectSpace, whic
 exclude = [
     "paper/*.pdf"
 ]
-
+keywords = ["concurrent", "parallel", "tuple-space", "object-space", "linda"]
+categories = ["concurrency", "data-structures", "database"]
 
 [dependencies]
 serde = "1.0"
