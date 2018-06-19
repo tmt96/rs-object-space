@@ -357,7 +357,7 @@ where
     R: RangeBounds<f64>,
 {
     (
-        convert_float_bound(range.start()),
-        convert_float_bound(range.end()),
+        convert_float_bound(range.start_bound()),
+        convert_float_bound(range.end_bound()),
     )
 }
