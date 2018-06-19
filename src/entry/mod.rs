@@ -131,27 +131,36 @@ macro_rules! impl_value_lookup_entry {
 impl_value_lookup_entry!{i64 String bool f64}
 
 pub trait RangeLookupEntry<U> {
-    fn get_by_range(&self, field: &str, range: impl RangeBounds<U>) -> Option<Value>;
+    fn get_by_range<R>(&self, field: &str, range: R) -> Option<Value>
+    where
+        R: RangeBounds<U>;
 
-    fn get_all_by_range<'a>(&'a self, field: &str, range: impl RangeBounds<U>) -> Box<Iterator<Item = Value> + 'a>;
+    fn get_all_by_range<'a, R>(&'a self, field: &str, range: R) -> Box<Iterator<Item = Value> + 'a>
+    where
+        R: RangeBounds<U>;
 
-    fn remove_by_range(&mut self, field: &str, range: impl RangeBounds<U>) -> Option<Value>;
+    fn remove_by_range<R>(&mut self, field: &str, range: R) -> Option<Value>
+    where
+        R: RangeBounds<U>;
 
-    fn remove_all_by_range<'a>(&'a mut self, field: &str, range: impl RangeBounds<U>) -> Vec<Value>;
+    fn remove_all_by_range<'a, R>(&'a mut self, field: &str, range: R) -> Vec<Value>
+    where
+        R: RangeBounds<U>;
 }
 
 macro_rules! impl_range_lookup_entry {
     ($($ty:ty)*) => {
         $(            
             impl RangeLookupEntry<$ty> for Entry {
-                fn get_by_range(&self, field: &str, range: impl RangeBounds<$ty>) -> Option<Value> 
+                fn get_by_range<R>(&self, field: &str, range: R) -> Option<Value> 
+                where R: RangeBounds<$ty>
                 {
                     let index = self.indexer.get_index_by_range(field, range);
                     index.and_then(|i| self.get_value_from_index(&i))
                 }
 
-                fn get_all_by_range<'a>(&'a self, field: &str, range: impl RangeBounds<$ty>) -> Box<Iterator<Item = Value> + 'a> 
-                
+                fn get_all_by_range<'a, R>(&'a self, field: &str, range: R) -> Box<Iterator<Item = Value> + 'a> 
+                where R: RangeBounds<$ty>
                 {
                     let indices = self.indexer.get_all_indices_by_range(field, range);
                     Box::new(
@@ -159,8 +168,8 @@ macro_rules! impl_range_lookup_entry {
                     )
                 }
 
-                fn remove_by_range(&mut self, field: &str, range: impl RangeBounds<$ty>) -> Option<Value> 
-                
+                fn remove_by_range<R>(&mut self, field: &str, range: R) -> Option<Value> 
+                where R: RangeBounds<$ty>
                 {
                     let index = self.indexer.get_index_by_range(field, range);
                     index.and_then(|i| {
@@ -170,8 +179,8 @@ macro_rules! impl_range_lookup_entry {
                     })
                 }
 
-                fn remove_all_by_range(&mut self, field: &str, range: impl RangeBounds<$ty>) -> Vec<Value> 
-                
+                fn remove_all_by_range<R>(&mut self, field: &str, range: R) -> Vec<Value> 
+                where R: RangeBounds<$ty>
                 {
                     let indices: Vec<u64> = self.indexer.get_all_indices_by_range(field, range).collect();
                     let mut result = Vec::new();

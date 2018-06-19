@@ -253,20 +253,26 @@ impl ValueLookupIndexer<f64> for ValueIndexer {
 }
 
 pub trait RangeLookupIndexer<T> {
-    fn get_index_by_range(&self, field: &str, range: impl RangeBounds<T>) -> Option<u64>;
+    fn get_index_by_range<R>(&self, field: &str, range: R) -> Option<u64>
+    where
+        R: RangeBounds<T>;
 
-    fn get_all_indices_by_range<'a>(
+    fn get_all_indices_by_range<'a, R>(
         &'a self,
         field: &str,
-        range: impl RangeBounds<T>,
-    ) -> Box<Iterator<Item = u64> + 'a>;
+        range: R,
+    ) -> Box<Iterator<Item = u64> + 'a>
+    where
+        R: RangeBounds<T>;
 }
 
 macro_rules! impl_range_lookup_indexer {
     ($([$path:ident, $ty:ty])*) => {
         $(
             impl RangeLookupIndexer<$ty> for ValueIndexer {
-                fn get_index_by_range(&self, field: &str, range: impl RangeBounds<$ty>) -> Option<u64>
+                fn get_index_by_range<R>(&self, field: &str, range: R) -> Option<u64>
+                where
+                    R: RangeBounds<$ty> 
                 {
                     match *self {
                         ValueIndexer::Null => None,
@@ -280,16 +286,17 @@ macro_rules! impl_range_lookup_indexer {
                         },
                         ValueIndexer::Branch(ref field_map) => field_map
                             .get(field)
-                            .and_then(|entry| entry.get_index_by_range("", range)),
+                            .and_then(|entry| entry.get_index_by_range::<_>("", range)),
                         _ => panic!("Not correct type"),
                     }
                 }
 
-                fn get_all_indices_by_range<'a>(
+                fn get_all_indices_by_range<'a, R>(
                     &'a self,
                     field: &str,
-                    range: impl RangeBounds<$ty>
-                ) -> Box<Iterator<Item = u64> + 'a> {
+                    range: R
+                ) -> Box<Iterator<Item = u64> + 'a>
+                where R: RangeBounds<$ty> {
                     match *self {
                         ValueIndexer::Null => Box::new(empty()),
                         ValueIndexer::$path(ref map) => Box::new(
@@ -301,7 +308,7 @@ macro_rules! impl_range_lookup_indexer {
                             .get(field)
                             .map_or(
                                 Box::new(empty()),
-                                |entry| entry.get_all_indices_by_range("", range)
+                                |entry| entry.get_all_indices_by_range::<_>("", range)
                             ),
                         _ => panic!("Not correct type"),
                     }
@@ -314,16 +321,20 @@ macro_rules! impl_range_lookup_indexer {
 impl_range_lookup_indexer!{ [IntLeaf, i64] [StringLeaf, String] [FloatLeaf, NotNaN<f64>] }
 
 impl RangeLookupIndexer<f64> for ValueIndexer {
-    fn get_index_by_range(&self, field: &str, range: impl RangeBounds<f64>) -> Option<u64>
+    fn get_index_by_range<R>(&self, field: &str, range: R) -> Option<u64>
+    where
+        R: RangeBounds<f64>,
     {
         self.get_index_by_range(field, convert_float_range(range))
     }
 
-    fn get_all_indices_by_range<'a>(
+    fn get_all_indices_by_range<'a, R>(
         &'a self,
         field: &str,
-        range: impl RangeBounds<f64>,
+        range: R,
     ) -> Box<Iterator<Item = u64> + 'a>
+    where
+        R: RangeBounds<f64>,
     {
         self.get_all_indices_by_range(field, convert_float_range(range))
     }
@@ -341,10 +352,12 @@ fn convert_float_bound(bound: Bound<&f64>) -> Bound<NotNaN<f64>> {
     }
 }
 
-fn convert_float_range(range: impl RangeBounds<f64>) -> (Bound<NotNaN<f64>>, Bound<NotNaN<f64>>)
+fn convert_float_range<R>(range: R) -> (Bound<NotNaN<f64>>, Bound<NotNaN<f64>>)
+where
+    R: RangeBounds<f64>,
 {
     (
-        convert_float_bound(range.start_bound()),
-        convert_float_bound(range.end_bound()),
+        convert_float_bound(range.start()),
+        convert_float_bound(range.end()),
     )
 }
