@@ -1,5 +1,7 @@
 # rs-object-space
 
+**NOTICE: THE LIBRARY IS STILL EXPERIMENTAL AND VERY BUGGY. API IS INCOMPLETE AND SUBJECTED TO CHANGE. PLEASE PROCEED WITH CAUTION**
+
 This crate is an implementation of ObjectSpace - a natural progression on the idea of [TupleSpace](https://en.wikipedia.org/wiki/Tuple_space) proposed by Gelernter in 1985. ObjectSpace is a data structure with the capability of holding any structure (e.g: a string, an int, and a complex struct could all lives under one ObjectSpace). It also allows retrieving a struct based on the value of a field.
 
 This crate also provides a fully thread-safe implementation of ObjectSpace, which allows simple concurrent and distributed programming.
