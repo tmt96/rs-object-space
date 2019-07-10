@@ -136,6 +136,7 @@ extern crate chashmap;
 extern crate indexmap;
 extern crate ordered_float;
 extern crate serde;
+#[cfg(test)]
 #[macro_use]
 extern crate serde_derive;
 extern crate serde_json;
